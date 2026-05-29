@@ -1,6 +1,6 @@
-# apollo_solar_consultation_app
+# Apollo Solar Consultation App
 
-A new Flutter project.
+Apollo Solar Consultation App is meant for internal use for the company, wherein the main users would be the sales agent during a client consultation. The app aids the agent in providing a approximate costing and specification according to the client's details during the consultation period. Furthermore, it also aims to categorize the aforementioned clients depending on how closable their transaction is.
 
 ## Getting Started
 
