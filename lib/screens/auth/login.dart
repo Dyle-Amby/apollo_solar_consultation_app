@@ -1,9 +1,11 @@
 // This is the login screen for the Apollo Solar Consultation Management System.
+
 import 'package:flutter/material.dart';
 import 'registration.dart';
+import 'forgot_pass.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({Key? key}) : super(key: key);
+  const LoginScreen({super.key});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -293,6 +295,41 @@ class _LoginScreenState extends State<LoginScreen> {
 
                         const SizedBox(height: 12),
 
+                        // Forgot Password link
+                        Center(
+                          child: TextButton(
+                            onPressed: () {
+                              // Navigate to forgot password screen
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const ForgotPasswordScreen(),
+                                ),
+                              );
+                            },
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'Forgot Password?',
+                                  style: TextStyle(
+                                    color: Color(0xFF1B2B6B),
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                SizedBox(width: 4),
+                                Icon(
+                                  Icons.chevron_right,
+                                  color: Color(0xFF1B2B6B),
+                                  size: 18,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        
+                        
                         // Register link
                         Center(
                           child: TextButton(
