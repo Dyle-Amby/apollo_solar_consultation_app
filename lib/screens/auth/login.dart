@@ -1,5 +1,6 @@
 // This is the login screen for the Apollo Solar Consultation Management System.
 
+import 'package:apollo_solar_consultation_app/screens/home/dashboard.dart';
 import 'package:flutter/material.dart';
 import 'registration.dart';
 import 'forgot_pass.dart';
@@ -25,13 +26,25 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _submit() {
-    if (_formKey.currentState?.validate() ?? false) {
-      ScaffoldMessenger.of(
+  if (_formKey.currentState?.validate() ?? false) {
+    // Temporary hardcoded routing - will be replaced with real API later
+    String email = _emailController.text;
+
+    if (email.contains('admin')) {
+      /*
+      Navigator.pushReplacement(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Logging in...')));
+        MaterialPageRoute(builder: (context) => const AdminDashboardPage()),
+      );
+      */
+    } else {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const DashboardPage()),
+      );
     }
   }
-
+}
   @override
   Widget build(BuildContext context) {
     return Scaffold(
