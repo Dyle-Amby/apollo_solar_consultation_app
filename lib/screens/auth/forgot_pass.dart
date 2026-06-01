@@ -175,29 +175,4 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   }
 
   // Reusable input decoration to avoid repeating the same styling
-  InputDecoration _inputDecoration(String hint) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: const TextStyle(
-        color: Color(0xFFAAAAAA),
-        fontSize: 14,
-      ),
-      contentPadding: const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 14,
-      ),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: Color(0xFF1B2B6B)),
-      ),
-    );
-  }
 }
