@@ -1,3 +1,4 @@
+import 'package:apollo_solar_consultation_app/screens/home/consultation/consultation_flow.dart';
 import 'package:apollo_solar_consultation_app/screens/auth/login.dart';
 import 'package:flutter/material.dart';
 
@@ -138,7 +139,14 @@ class _DashboardPageState extends State<DashboardPage> {
               title: 'New Consultation',
               subtitle: 'Start a client consultation',
               filled: true,
-              onTap: () {},
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ConsultationFlow(),
+                  ),
+                );
+              },
             ),
 
             const SizedBox(height: 8),
