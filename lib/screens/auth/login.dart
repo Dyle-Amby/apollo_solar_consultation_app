@@ -1,5 +1,3 @@
-// This is the login screen for the Apollo Solar Consultation Management System.
-
 import 'package:apollo_solar_consultation_app/screens/home/dashboard.dart';
 import 'package:flutter/material.dart';
 import 'registration.dart';
