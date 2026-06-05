@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:apollo_solar_consultation_app/models/consultation_data.dart';
 import 'package:apollo_solar_consultation_app/widgets/step_scaffold.dart';
+import 'package:apollo_solar_consultation_app/widgets/location_picker_field.dart';
 
 class Step1ClientInfo extends StatefulWidget {
   final ConsultationData data;
@@ -23,8 +24,6 @@ class _Step1ClientInfoState extends State<Step1ClientInfo> {
   late TextEditingController _contactController;
   late TextEditingController _emailController;
   late TextEditingController _addressController;
-  late TextEditingController _latController;
-  late TextEditingController _longController;
   String _propertyType = 'Residential';
 
   @override
@@ -35,8 +34,6 @@ class _Step1ClientInfoState extends State<Step1ClientInfo> {
     _contactController = TextEditingController(text: widget.data.contactNumber);
     _emailController = TextEditingController(text: widget.data.email);
     _addressController = TextEditingController(text: widget.data.address);
-    _latController = TextEditingController(text: widget.data.latitude == 0 ? '' : '${widget.data.latitude}');
-    _longController = TextEditingController(text: widget.data.longitude == 0 ? '' : '${widget.data.longitude}');
     _propertyType = widget.data.propertyType.isEmpty ? 'Residential' : widget.data.propertyType;
   }
 
@@ -46,20 +43,18 @@ class _Step1ClientInfoState extends State<Step1ClientInfo> {
     _contactController.dispose();
     _emailController.dispose();
     _addressController.dispose();
-    _latController.dispose();
-    _longController.dispose();
     super.dispose();
   }
 
   void _saveAndNext() {
-    // Save to shared data object before moving forward
+    // Save to shared data object before moving forward.
+    // NOTE: latitude/longitude are written directly by LocationPickerField,
+    // so we must NOT overwrite them here.
     widget.data.fullName = _nameController.text;
     widget.data.contactNumber = _contactController.text;
     widget.data.email = _emailController.text;
     widget.data.propertyType = _propertyType;
     widget.data.address = _addressController.text;
-    widget.data.latitude = double.tryParse(_latController.text) ?? 0;
-    widget.data.longitude = double.tryParse(_longController.text) ?? 0;
     widget.onNext();
   }
 
@@ -67,11 +62,11 @@ class _Step1ClientInfoState extends State<Step1ClientInfo> {
   Widget build(BuildContext context) {
     return StepScaffold(
       currentStep: 1,
-      totalSteps: 10,
+      totalSteps: 8,
       title: 'Client Information',
-      onNext: _saveAndNext,     // saves data then calls flow's onNext
+      onNext: _saveAndNext, // saves data then calls flow's onNext
       onBack: widget.onBack,
-      showBack: false,          // Step 1 has no previous step
+      showBack: false, // Step 1 has no previous step
       child: _buildContent(),
     );
   }
@@ -135,65 +130,19 @@ class _Step1ClientInfoState extends State<Step1ClientInfo> {
           const SizedBox(height: 16),
 
           // Full Address
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _fieldLabel(Icons.location_on_outlined, 'Full Address'),
-              TextButton.icon(
-                onPressed: () {
-                  // GPS location logic later
-                },
-                icon: const Icon(Icons.my_location,
-                    size: 14, color: Color(0xFF1B2B6B)),
-                label: const Text(
-                  'Get Location',
-                  style: TextStyle(
-                    color: Color(0xFF1B2B6B),
-                    fontSize: 12,
-                  ),
-                ),
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  minimumSize: Size.zero,
-                ),
-              ),
-            ],
-          ),
+          _fieldLabel(Icons.location_on_outlined, 'Full Address'),
           const SizedBox(height: 8),
           _inputField('Block X Lot X City', _addressController),
           const SizedBox(height: 16),
 
-          // Latitude and Longitude side by side
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Latitude',
-                        style: TextStyle(
-                            fontSize: 13, color: Color(0xFF888888))),
-                    const SizedBox(height: 8),
-                    _inputField('0.000000', _latController,
-                        keyboard: TextInputType.number),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Longitude',
-                        style: TextStyle(
-                            fontSize: 13, color: Color(0xFF888888))),
-                    const SizedBox(height: 8),
-                    _inputField('0.000000', _longController,
-                        keyboard: TextInputType.number),
-                  ],
-                ),
-              ),
-            ],
+          // Map pin (writes latitude/longitude/address into data).
+          // When a pin is dropped, mirror the geocoded address back into
+          // the address field so _saveAndNext persists it.
+          LocationPickerField(
+            data: widget.data,
+            onPicked: () => setState(() {
+              _addressController.text = widget.data.address;
+            }),
           ),
         ],
       ),

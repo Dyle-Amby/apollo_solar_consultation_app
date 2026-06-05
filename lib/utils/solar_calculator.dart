@@ -117,22 +117,40 @@ Map<String, dynamic> tiers = {
 // ── Pricing source tracking ─────────────────────────────────
 String pricingSource = 'fallback'; // 'live' | 'fallback'
 DateTime? pricingUpdatedAt;
-bool _pricingTried = false;
 
 num _n(dynamic v) => v is num ? v : 0;
 
-/// Fetch once per app session; safe to call repeatedly (no-op after first).
-/// Call this when the consultation flow opens for instant results later.
-Future<void> ensurePricing() async {
-  if (_pricingTried) return;
-  _pricingTried = true;
-  await fetchLivePricing();
+// Safe map: never returns null, so a missing/odd live field can't red-screen.
+Map<String, dynamic> _m(dynamic v) =>
+    v is Map ? v.cast<String, dynamic>() : <String, dynamic>{};
+
+// Recursively overlay [src] onto [base]. Live values win; anything the sheet
+// omits keeps the fallback value — so the tier structure is always complete.
+Map<String, dynamic> _deepMerge(Map<String, dynamic> base, Map src) {
+  final out = Map<String, dynamic>.from(base);
+  src.forEach((k, v) {
+    final key = '$k';
+    if (v is Map && out[key] is Map) {
+      out[key] = _deepMerge(Map<String, dynamic>.from(out[key] as Map), v);
+    } else {
+      out[key] = v;
+    }
+  });
+  return out;
 }
+
+// Shared in-flight fetch: the first caller starts it, every later caller
+// (e.g. the results page) awaits the SAME future instead of racing.
+Future<void>? _pricingFuture;
+
+/// Fetch pricing once per app session. Safe to call from the flow's
+/// initState (warm-up) and again from the results page — both share one fetch.
+Future<void> ensurePricing() => _pricingFuture ??= fetchLivePricing();
 
 Future<void> fetchLivePricing() async {
   try {
     final url = Uri.parse('$kPricingUrl?t=${DateTime.now().millisecondsSinceEpoch}');
-    final res = await http.get(url).timeout(const Duration(seconds: 6));
+    final res = await http.get(url).timeout(const Duration(seconds: 30));
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
 
     final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -153,8 +171,14 @@ Future<void> fetchLivePricing() async {
     }
     final pt = p['tiers'];
     if (pt is Map) {
-      if (pt['gridtied'] != null) tiers['gridtied'] = Map<String, dynamic>.from(pt['gridtied']);
-      if (pt['hybrid'] != null) tiers['hybrid'] = Map<String, dynamic>.from(pt['hybrid']);
+      if (pt['gridtied'] is Map) {
+        tiers['gridtied'] =
+            _deepMerge(_m(tiers['gridtied']), pt['gridtied'] as Map);
+      }
+      if (pt['hybrid'] is Map) {
+        tiers['hybrid'] =
+            _deepMerge(_m(tiers['hybrid']), pt['hybrid'] as Map);
+      }
     }
 
     pricingSource = 'live';
@@ -162,6 +186,8 @@ Future<void> fetchLivePricing() async {
         data['updated_at'] != null ? DateTime.tryParse('${data['updated_at']}') : null;
   } catch (_) {
     pricingSource = 'fallback';
+    // Allow a retry next session/attempt if this fetch failed.
+    _pricingFuture = null;
   }
 }
 
@@ -211,15 +237,15 @@ TierResult calcTier(
   double kwhRate, {
   String roofDir = 'unknown',
 }) {
-  final p = t['panel'] as Map<String, dynamic>;
-  final inv = (t['inv'] ?? const {}) as Map<String, dynamic>;
-  final mount = t['mount'] as Map<String, dynamic>;
-  final prot = t['prot'] as Map<String, dynamic>;
-  final wire = t['wire'] as Map<String, dynamic>;
-  final cons = t['cons'] as Map<String, dynamic>;
-  final batt = t['batt'] as Map<String, dynamic>?;
+  final p = _m(t['panel']);
+  final inv = _m(t['inv']);
+  final mount = _m(t['mount']);
+  final prot = _m(t['prot']);
+  final wire = _m(t['wire']);
+  final cons = _m(t['cons']);
+  final batt = t['batt'] is Map ? _m(t['batt']) : null;
   final mk = _n(t['markup']);
-  final pw = _n(p['w']);
+  final pw = _n(p['w']) > 0 ? _n(p['w']) : 510; // guard against div-by-zero
 
   final dailyKwh = monthlyKwh / 30;
   final neededKwp = dailyKwh / (kPsh * (1 - kLoss));
@@ -305,10 +331,10 @@ List<TierResult> calcAllTiers({
   required double kwhRate,
   String roofDir = 'unknown',
 }) {
-  final set = tiers[systemType] as Map<String, dynamic>;
+  final set = _m(tiers[systemType]);
   return [
-    calcTier(set['entry'], monthlyKwh, kwhRate, roofDir: roofDir),
-    calcTier(set['mid'], monthlyKwh, kwhRate, roofDir: roofDir),
-    calcTier(set['high'], monthlyKwh, kwhRate, roofDir: roofDir),
+    calcTier(_m(set['entry']), monthlyKwh, kwhRate, roofDir: roofDir),
+    calcTier(_m(set['mid']), monthlyKwh, kwhRate, roofDir: roofDir),
+    calcTier(_m(set['high']), monthlyKwh, kwhRate, roofDir: roofDir),
   ];
 }
