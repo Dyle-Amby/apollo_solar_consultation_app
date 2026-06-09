@@ -23,7 +23,8 @@ import 'package:apollo_solar_consultation_app/screens/home/consultation/consulta
 import 'package:apollo_solar_consultation_app/screens/home/consultation/consultation_steps/step6_battery.dart';
 import 'package:apollo_solar_consultation_app/screens/home/consultation/consultation_steps/step7_timeline.dart';
 import 'package:apollo_solar_consultation_app/screens/home/consultation/consultation_steps/step8_result_screen.dart';
-import 'package:apollo_solar_consultation_app/services/booking_service.dart';
+import 'package:apollo_solar_consultation_app/screens/home/consultation/consultation_history.dart';
+import 'package:apollo_solar_consultation_app/screens/home/consultation/consultation_ticket.dart';
 
 class ConsultationFlow extends StatefulWidget {
   const ConsultationFlow({Key? key}) : super(key: key);

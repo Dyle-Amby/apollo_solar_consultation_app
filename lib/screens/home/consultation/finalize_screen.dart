@@ -1,7 +1,7 @@
 // lib/screens/home/consultation/finalize_screen.dart
 //
 // Reached from the Results page's orange "Complete Consultation" button.
-// The agent classifies the client, sets an ocular-visit date (or marks it
+// The agent sets an ocular-visit date (or marks it
 // "To be followed" if undecided), then saves. Saving upserts a booking via
 // the same n8n API the web tracker uses, so it appears in Consultation
 // History and can be changed there later.
@@ -16,13 +16,6 @@ const _navy = Color(0xFF1A2A6C);
 const _gold = Color(0xFFC8A200);
 const _grey = Color(0xFF888888);
 
-// Your 3-tier account classification.
-const List<Map<String, String>> _classes = [
-  {'key': 'closable', 'label': 'Closable', 'desc': 'Strong intent — ready to move, just finalizing.'},
-  {'key': 'workable', 'label': 'Workable', 'desc': 'Interested — needs follow-up/nurturing to close.'},
-  {'key': 'inquiry', 'label': 'Inquiry', 'desc': 'Early exploration — gathering information only.'},
-];
-
 class FinalizeScreen extends StatefulWidget {
   final ConsultationData data;
   const FinalizeScreen({Key? key, required this.data}) : super(key: key);
@@ -32,7 +25,6 @@ class FinalizeScreen extends StatefulWidget {
 }
 
 class _FinalizeScreenState extends State<FinalizeScreen> {
-  String _classification = '';
   bool _tbf = false; // "to be followed" — client hasn't decided on a date
   DateTime? _ocular;
   bool _saving = false;
@@ -137,33 +129,40 @@ class _FinalizeScreenState extends State<FinalizeScreen> {
     final d = widget.data;
     final agent = _agentCtrl.text.trim();
     final by = agent.isNotEmpty ? agent : 'Agent';
-    final stageKey = _tbf || _ocular == null ? 'assigned' : 'scheduled';
-    final events = [
-      {
-        'stageKey': stageKey,
-        'time': DateTime.now().toIso8601String(),
-        'note': _noteCtrl.text.trim(),
-        'by': by,
-      }
-    ];
+    final hasDate = !_tbf && _ocular != null;
+
+    // Use the ticket tracker's vocabulary. A dated booking completes the
+    // first step ("Ocular Visit Booked"); a "to be followed" booking starts
+    // empty so the tracker opens on that first step.
+    final events = hasDate
+        ? [
+            {
+              'stepKey': 'ocular_booked',
+              'label': 'Ocular Visit Booked',
+              'time': DateTime.now().toIso8601String(),
+              'by': by,
+              'role': 'sales',
+              'value': _ocular!.toIso8601String(),
+              'note': _noteCtrl.text.trim(),
+            }
+          ]
+        : [];
+
     return {
       'ref': _ref,
       'client': d.fullName,
       'agent': agent,
-      'schedule': (_tbf || _ocular == null) ? '' : _ocular!.toIso8601String(),
-      'stage': stageIndex(stageKey),
-      'status': stageLabel(stageKey),
+      'schedule': hasDate ? _ocular!.toIso8601String() : '',
+      'stage': hasDate ? 1 : 0,
+      'status': hasDate ? 'Ocular Acknowledged' : 'Ocular Visit Booked',
       'events': jsonEncode(events),
       'updatedBy': by,
       'updatedAt': DateTime.now().toIso8601String(),
-      // NEW fields — need columns in the Airtable "Bookings" table + mapping
-      // added to the "Airtable — Upsert Booking" node (see chat notes).
-      'classification': _classification,
+      // Needs Airtable "Consultation" (long text) column + mapping on the
+      // upsert node. Stores the recommendation snapshot for the ticket view.
       'consultation': jsonEncode(_snapshot()),
     };
   }
-
-  static const _classLabels = {'closable': 'Closable', 'workable': 'Workable', 'inquiry': 'Inquiry'};
 
   // Payload for the "Consultation Booked" workflow (Sheets log + email).
   Map<String, dynamic> _bookedPayload() {
@@ -184,18 +183,12 @@ class _FinalizeScreenState extends State<FinalizeScreen> {
       'consultationDate': dateStr,
       'consultationTime': timeStr,
       'propertyLocation': d.address,
-      'clientCategory': _classLabels[_classification] ?? '',
+      'clientCategory': '',
       'notes': _noteCtrl.text.trim(),
     };
   }
 
   Future<void> _save() async {
-    if (_classification.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please classify the client first.')),
-      );
-      return;
-    }
     setState(() => _saving = true);
     final ok = await BookingService.save(_payload());
     if (!mounted) return;
@@ -223,10 +216,24 @@ class _FinalizeScreenState extends State<FinalizeScreen> {
         ),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not save — check connection and try again.'),
-          backgroundColor: Color(0xFFC0392B),
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Save failed'),
+          content: SingleChildScrollView(
+            child: SelectableText(
+              BookingService.lastError.isEmpty
+                  ? 'Unknown error.'
+                  : BookingService.lastError,
+              style: const TextStyle(fontSize: 12.5),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
         ),
       );
     }
@@ -247,10 +254,6 @@ class _FinalizeScreenState extends State<FinalizeScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             _refCard(),
-            const SizedBox(height: 16),
-            _sectionTitle('Client Classification'),
-            const SizedBox(height: 8),
-            for (final c in _classes) _classCard(c),
             const SizedBox(height: 16),
             _sectionTitle('Ocular Visit'),
             const SizedBox(height: 8),
@@ -289,44 +292,6 @@ class _FinalizeScreenState extends State<FinalizeScreen> {
           ],
         ),
       );
-
-  Widget _classCard(Map<String, String> c) {
-    final selected = _classification == c['key'];
-    return GestureDetector(
-      onTap: () => setState(() => _classification = c['key']!),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: selected ? const Color(0xFFFFF6E6) : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected ? _gold : const Color(0xFFE6E9F2),
-            width: selected ? 2 : 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(selected ? Icons.radio_button_checked : Icons.radio_button_off,
-                color: selected ? _gold : _grey, size: 22),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(c['label']!,
-                      style: const TextStyle(
-                          color: _navy, fontSize: 15, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 2),
-                  Text(c['desc']!, style: const TextStyle(color: _grey, fontSize: 12.5)),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _ocularCard() => Container(
         padding: const EdgeInsets.all(14),
