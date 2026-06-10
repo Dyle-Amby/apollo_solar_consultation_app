@@ -1,4 +1,4 @@
-// lib/screens/home/consultation/consultation_ticket_screen.dart
+// lib/screens/home/consultation/consultation_ticket.dart
 //
 // The role-gated consultation ticket tracker (Flutter port of the HTML
 // preview). Opened from the history list. Renders the 7-stage pipeline as a
