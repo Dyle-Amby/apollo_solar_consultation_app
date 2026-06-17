@@ -48,6 +48,7 @@ class _DashboardPageState extends State<DashboardPage> {
     final myRole = Session.role;
 
     for (final b in items) {
+      if (ticketIsClosed(b['events'])) continue; // Did Not Push Through — closed
       final step = ticketCurrentStep(b['events']);
       if (step == null) {
         completed++;

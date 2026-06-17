@@ -35,8 +35,8 @@ const List<TicketStep> kTicketSteps = [
   TicketStep('second_opinion', 'Second-Opinion Outcome (if requested)', 'sales',
       input: 'choice', optional: true),
 
-  TicketStep('client_ok', 'Final Quotation Approved by Client', 'sales',
-      stageTitle: '4 · Client Approval & Scheduling'),
+  TicketStep('client_ok', 'Client Decision on Final Quotation', 'sales',
+      stageTitle: '4 · Client Approval & Scheduling', input: 'outcome'),
   TicketStep('delivery_date', 'Delivery Date Booked', 'sales', input: 'date'),
   TicketStep('install_date', 'Installation Date Booked', 'sales', input: 'date'),
 
@@ -85,5 +85,71 @@ TicketStep? ticketCurrentStep(dynamic eventsRaw) {
   return i < kTicketSteps.length ? kTicketSteps[i] : null;
 }
 
-String roleLabel(String r) =>
-    {'sales': 'Sales Agent', 'hos': 'Head of Sales', 'eng': 'Engineering'}[r] ?? r;
+String roleLabel(String r) => const {
+      'sales': 'Sales',
+      'eng': 'Engineering',
+      'hos': 'Head of Sales',
+      'hoe': 'Head of Engineering',
+      'admin': 'Admin',
+    }[r] ?? r;
+
+// Which step-owners a given account role is allowed to act on. Supervisors
+// cover their team's steps; Admin covers everything. (Adjust to taste.)
+const Map<String, List<String>> kRolePermissions = {
+  'sales': ['sales'],
+  'hos': ['sales', 'hos'],
+  'eng': ['eng'],
+  'hoe': ['eng', 'hoe'],
+  'admin': ['sales', 'hos', 'eng', 'hoe'],
+};
+
+bool canActOn(String userRole, String stepOwner) =>
+    (kRolePermissions[userRole] ?? const []).contains(stepOwner);
+
+// ── Client decision outcome (recorded at the client_ok step) ──────────────────
+// 'closing'  → client approved; ticket PROCEEDS to delivery / installation.
+// 'workable' → still negotiating; ticket PARKS on client_ok (stays with Sales,
+//              re-decidable later). Stored under a non-step key so it never
+//              marks client_ok done.
+// 'lost'     → "Did Not Push Through"; ticket CLOSES, carrying a reason note.
+const Map<String, String> kOutcomeLabels = {
+  'closing': 'For Closing',
+  'workable': 'Workable',
+  'lost': 'Did Not Push Through',
+};
+
+String outcomeStatus(String outcome) {
+  switch (outcome) {
+    case 'closing':
+      return 'Client Approved — For Closing';
+    case 'workable':
+      return 'Workable — Awaiting Client Decision';
+    case 'lost':
+      return 'Closed — Did Not Push Through';
+    default:
+      return '';
+  }
+}
+
+/// The most recent client-decision outcome on the ticket, or '' if none yet.
+String ticketOutcome(dynamic eventsRaw) {
+  var out = '';
+  for (final e in parseTicketEvents(eventsRaw)) {
+    final o = '${e['outcome'] ?? ''}';
+    if (o.isNotEmpty) out = o; // last one wins (re-decisions override)
+  }
+  return out;
+}
+
+/// True once the client declined — the ticket is closed (lost) and needs no
+/// further action from anyone.
+bool ticketIsClosed(dynamic eventsRaw) => ticketOutcome(eventsRaw) == 'lost';
+
+/// The reason captured when the deal did not push through ('' if none).
+String ticketLostReason(dynamic eventsRaw) {
+  var reason = '';
+  for (final e in parseTicketEvents(eventsRaw)) {
+    if ('${e['outcome'] ?? ''}' == 'lost') reason = '${e['note'] ?? ''}';
+  }
+  return reason;
+}
