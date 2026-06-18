@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:apollo_solar_consultation_app/models/consultation_data.dart';
 import 'package:apollo_solar_consultation_app/services/booking_service.dart';
+import 'package:apollo_solar_consultation_app/services/session.dart';
 import 'package:apollo_solar_consultation_app/utils/solar_calculator.dart' as calc;
 
 const _navy = Color(0xFF1A2A6C);
@@ -36,7 +37,9 @@ class _FinalizeScreenState extends State<FinalizeScreen> {
   @override
   void initState() {
     super.initState();
-    _agentCtrl = TextEditingController(text: widget.data.fullName.isEmpty ? '' : '');
+    // Default the agent to the signed-in user (still editable if someone is
+    // logging a consultation on behalf of another agent).
+    _agentCtrl = TextEditingController(text: Session.name);
   }
 
   @override
@@ -108,7 +111,10 @@ class _FinalizeScreenState extends State<FinalizeScreen> {
         'length': d.roofLength,
         'width': d.roofWidth,
         'direction': d.roofDirection,
+        'obstructions': d.obstructions,
       },
+      'obstructions': d.obstructions,
+      'notes': _noteCtrl.text.trim(),
       'pricingSource': calc.pricingSource,
       'recommendations': [
         for (final t in tiers)
@@ -146,7 +152,20 @@ class _FinalizeScreenState extends State<FinalizeScreen> {
               'note': _noteCtrl.text.trim(),
             }
           ]
-        : [];
+        : [
+            // "To be followed" — no date yet, but still log that the consultation
+            // was created so Events / Status History aren't blank. This is NOT a
+            // pipeline step, so the tracker still opens on "Ocular Visit Booked".
+            {
+              'stepKey': 'consultation_logged',
+              'label': 'Consultation Logged — To Be Followed',
+              'time': DateTime.now().toIso8601String(),
+              'by': by,
+              'role': 'sales',
+              'value': 'To be followed',
+              'note': _noteCtrl.text.trim(),
+            }
+          ];
 
     return {
       'ref': _ref,
@@ -155,11 +174,25 @@ class _FinalizeScreenState extends State<FinalizeScreen> {
       'schedule': hasDate ? _ocular!.toIso8601String() : '',
       'stage': hasDate ? 1 : 0,
       'status': hasDate ? 'Ocular Acknowledged' : 'Ocular Visit Booked',
+      // Whose turn it is now: a dated booking waits on Engineering's ack,
+      // an undated one still waits on Sales to book the ocular.
+      'currentOwner': hasDate ? 'eng' : 'sales',
       'events': jsonEncode(events),
+      // Stable creation timestamp — set ONCE here and re-sent unchanged on every
+      // tracker update, so the Sheet's "Created" column never resets.
+      'createdAt': DateTime.now().toIso8601String(),
       'updatedBy': by,
       'updatedAt': DateTime.now().toIso8601String(),
-      // Needs Airtable "Consultation" (long text) column + mapping on the
-      // upsert node. Stores the recommendation snapshot for the ticket view.
+      // Flat, human-readable columns for the Google Sheet, so staff don't have
+      // to open the Consultation JSON to see who/where.
+      'clientType': d.propertyType,
+      'contact': d.contactNumber,
+      'email': d.email,
+      'location': d.address,
+      'systemType': d.isHybrid ? 'Hybrid' : 'Grid-Tied',
+      'obstructions': d.obstructions,
+      'notes': _noteCtrl.text.trim(),
+      // Full recommendation snapshot for the ticket view (kept as JSON).
       'consultation': jsonEncode(_snapshot()),
     };
   }

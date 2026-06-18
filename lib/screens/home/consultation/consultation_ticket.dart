@@ -13,6 +13,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:apollo_solar_consultation_app/services/booking_service.dart';
 import 'package:apollo_solar_consultation_app/services/session.dart';
+import 'package:apollo_solar_consultation_app/services/ticket_pipeline.dart';
 
 const _navy = Color(0xFF1A2A6C);
 const _gold = Color(0xFFC8A200);
@@ -21,58 +22,27 @@ const _grey = Color(0xFF888888);
 const _line = Color(0xFFE3E7F0);
 
 String _roleLabel(String r) =>
-    {'sales': 'Sales Agent', 'hos': 'Head of Sales', 'eng': 'Engineering'}[r] ?? r;
+    {
+      'sales': 'Sales Agent',
+      'hos': 'Head of Sales',
+      'eng': 'Engineering',
+      'hoe': 'Head of Engineering',
+      'admin': 'Admin',
+    }[r] ??
+    r;
 Color _roleColor(String r) =>
-    {'sales': _navy, 'hos': _gold, 'eng': _green}[r] ?? _navy;
-String _roleHint(String r) =>
-    {'sales': 'books & relays', 'hos': 'Sales sub-role', 'eng': 'field & specs'}[r] ?? '';
+    {
+      'sales': _navy,
+      'hos': _gold,
+      'eng': _green,
+      'hoe': const Color(0xFF128C7E),
+      'admin': const Color(0xFF6B4FA0),
+    }[r] ??
+    _navy;
 
-class _Step {
-  final String key;
-  final String label;
-  final String owner; // sales | hos | eng
-  final String? stageTitle; // set on the first step of a stage
-  final String input; // '' | date | text | choice | deliverable | photo | photos
-  final bool optional;
-  const _Step(this.key, this.label, this.owner,
-      {this.stageTitle, this.input = '', this.optional = false});
-}
-
-const List<_Step> _steps = [
-  _Step('ocular_booked', 'Ocular Visit Booked', 'sales',
-      stageTitle: '1 · Ocular Visit', input: 'date'),
-
-  _Step('ocular_ack', 'Ocular Acknowledged', 'eng',
-      stageTitle: '2 · Ocular (Engineering)', input: 'date'),
-  _Step('ocular_underway', 'Ocular Underway', 'eng'),
-  _Step('ocular_ongoing', 'Ocular Visit Ongoing', 'eng'),
-  _Step('ocular_finished', 'Ocular Visit Finished', 'eng'),
-  _Step('ocular_quote', 'Final Quotation — Price & Specification', 'eng', input: 'deliverable'),
-  _Step('hos_quote_ok', 'Quotation Approved by Head of Sales', 'hos'),
-
-  _Step('quote_sent', 'Final Quotation Sent to Client', 'sales',
-      stageTitle: '3 · Quotation to Client'),
-  _Step('second_opinion', 'Second-Opinion Outcome (if requested)', 'sales',
-      input: 'choice', optional: true),
-
-  _Step('client_ok', 'Final Quotation Approved by Client', 'sales',
-      stageTitle: '4 · Client Approval & Scheduling'),
-  _Step('delivery_date', 'Delivery Date Booked', 'sales', input: 'date'),
-  _Step('install_date', 'Installation Date Booked', 'sales', input: 'date'),
-
-  _Step('eng_assign', 'Assign Engineering Team', 'eng',
-      stageTitle: '5 · Engineering Approval', input: 'text'),
-  _Step('eng_dates', 'Engineering Confirms / Adjusts Dates', 'eng', input: 'date'),
-  _Step('hos_final', 'Head of Sales Final Approval', 'hos'),
-
-  _Step('materials_underway', 'Materials Underway', 'eng', stageTitle: '6 · Delivery'),
-  _Step('delivery_way', 'Delivery on the Way', 'eng'),
-  _Step('pod', 'Proof of Delivery', 'eng', input: 'photo'),
-
-  _Step('install_underway', 'Installation Underway', 'eng', stageTitle: '7 · Installation'),
-  _Step('install_photos', 'Photos: Before / During / After', 'eng', input: 'photos'),
-  _Step('completed', 'Installation Complete', 'eng'),
-];
+// Step model + pipeline now live in services/ticket_pipeline.dart.
+typedef _Step = TicketStep;
+const List<_Step> _steps = kTicketSteps;
 
 class ConsultationTicketScreen extends StatefulWidget {
   final Map<String, dynamic> booking;
@@ -143,6 +113,10 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
 
   // ── Advancing a step ──
   Future<void> _advance(_Step s) async {
+    if (s.input == 'outcome') {
+      await _handleOutcome(s);
+      return;
+    }
     String value = '';
     switch (s.input) {
       case 'date':
@@ -234,20 +208,100 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
     );
   }
 
-  Future<void> _persist(_Step s, String value) async {
-    setState(() => _saving = true);
+  // ── Client-decision outcome (client_ok step) ──
+  Future<void> _handleOutcome(_Step s) async {
+    final choice = await _outcomeSheet();
+    if (choice == null) return;
+    if (choice == 'closing') {
+      await _persist(s, kOutcomeLabels['closing']!, outcome: 'closing');
+    } else if (choice == 'workable') {
+      await _persistWorkable(s);
+    } else if (choice == 'lost') {
+      final reason = await _reasonDialog();
+      if (reason == null) return; // agent cancelled — leave the ticket open
+      await _persistLost(s, reason);
+    }
+  }
+
+  Future<String?> _outcomeSheet() async {
+    return showModalBottomSheet<String>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Text('Client decision on the final quotation',
+                  style: TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 15)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.check_circle, color: _green),
+              title: const Text('For Closing'),
+              subtitle: const Text('Approved — proceed to delivery & installation'),
+              onTap: () => Navigator.pop(context, 'closing'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.timelapse, color: _gold),
+              title: const Text('Workable'),
+              subtitle: const Text('Still negotiating — keep working the client'),
+              onTap: () => Navigator.pop(context, 'workable'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.cancel, color: Color(0xFFC0392B)),
+              title: const Text('Did Not Push Through'),
+              subtitle: const Text('Transaction fell through — closes the ticket'),
+              onTap: () => Navigator.pop(context, 'lost'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _reasonDialog() async {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: const Text('Why did it not push through?'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            hintText: 'e.g. Chose another supplier, budget on hold, lost contact…',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, ctrl.text.trim()),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFFC0392B)),
+            child: const Text('Close ticket'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Persisting ──
+  // Standard step advance: marks the step done and moves to the next pending one.
+  Future<void> _persist(_Step s, String value, {String outcome = ''}) async {
     final by = Session.name.isNotEmpty ? Session.name : _roleLabel(_activeRole);
-    final newEvents = [
-      ..._events,
-      {
-        'stepKey': s.key,
-        'label': s.label,
-        'time': DateTime.now().toIso8601String(),
-        'by': by,
-        'role': _activeRole,
-        'value': value,
-      }
-    ];
+    final ev = <String, dynamic>{
+      'stepKey': s.key,
+      'label': s.label,
+      'time': DateTime.now().toIso8601String(),
+      'by': by,
+      'role': _activeRole,
+      'value': value,
+    };
+    if (outcome.isNotEmpty) ev['outcome'] = outcome;
+    final newEvents = [..._events, ev];
 
     // current status = next pending step's label, or "Completed"
     final doneNow = newEvents.map((e) => '${e['stepKey']}').toSet();
@@ -260,8 +314,57 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
         break;
       }
     }
+    final ownerNow = stageIdx < _steps.length ? _steps[stageIdx].owner : '';
+    await _commit(newEvents, statusLabel, stageIdx, ownerNow);
+  }
 
+  // Workable: record it WITHOUT marking client_ok done, so the ticket stays
+  // parked on that step with Sales and can be re-decided later.
+  Future<void> _persistWorkable(_Step s) async {
+    final by = Session.name.isNotEmpty ? Session.name : _roleLabel(_activeRole);
+    final newEvents = [
+      ..._events,
+      {
+        'stepKey': 'client_workable', // not a real pipeline step
+        'label': 'Marked Workable',
+        'time': DateTime.now().toIso8601String(),
+        'by': by,
+        'role': _activeRole,
+        'value': kOutcomeLabels['workable'],
+        'outcome': 'workable',
+      }
+    ];
+    final idx = _steps.indexWhere((x) => x.key == s.key); // client_ok stays current
+    await _commit(newEvents, outcomeStatus('workable'), idx, 'sales');
+  }
+
+  // Did Not Push Through: marks client_ok done (so it leaves the queue) but
+  // closes the ticket — no further steps — and saves the reason.
+  Future<void> _persistLost(_Step s, String reason) async {
+    final by = Session.name.isNotEmpty ? Session.name : _roleLabel(_activeRole);
+    final newEvents = [
+      ..._events,
+      {
+        'stepKey': s.key,
+        'label': 'Did Not Push Through',
+        'time': DateTime.now().toIso8601String(),
+        'by': by,
+        'role': _activeRole,
+        'value': kOutcomeLabels['lost'],
+        'outcome': 'lost',
+        'note': reason.isEmpty ? 'No reason provided' : reason,
+      }
+    ];
+    await _commit(newEvents, outcomeStatus('lost'), _steps.length, '');
+  }
+
+  // Shared save: upserts the booking via n8n with the new events + status.
+  Future<void> _commit(List<Map<String, dynamic>> newEvents, String statusLabel,
+      int stageIdx, String ownerNow) async {
+    setState(() => _saving = true);
+    final by = Session.name.isNotEmpty ? Session.name : _roleLabel(_activeRole);
     final b = widget.booking;
+    final outcome = ticketOutcome(newEvents);
     final payload = {
       'ref': b['ref'],
       'client': b['client'] ?? '',
@@ -269,8 +372,20 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
       'schedule': b['schedule'] ?? '',
       'stage': stageIdx,
       'status': statusLabel,
+      'currentOwner': ownerNow,
       'events': jsonEncode(newEvents),
       'consultation': b['consultation'] ?? '', // preserve snapshot
+      // Re-send the ORIGINAL creation time + flat display fields so the upsert
+      // doesn't reset the Sheet's Created/readable columns on each step.
+      'createdAt': b['createdAt'] ?? '',
+      'clientType': b['clientType'] ?? '',
+      'contact': b['contact'] ?? '',
+      'email': b['email'] ?? '',
+      'location': b['location'] ?? '',
+      'systemType': b['systemType'] ?? '',
+      // Deal outcome (for the optional "Deal Outcome" / reason columns in Sheets).
+      'outcome': outcome,
+      'lostReason': outcome == 'lost' ? ticketLostReason(newEvents) : '',
       'updatedBy': by,
       'updatedAt': DateTime.now().toIso8601String(),
     };
@@ -308,8 +423,24 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
     final b = widget.booking;
     final cur = _currentIndex;
     final done = cur >= _steps.length;
-    final statusText = done ? 'Completed' : _steps[cur].label;
-    final statusColor = done ? _green : _roleColor(_steps[cur].owner);
+    final closed = ticketIsClosed(_events);
+    final outcome = ticketOutcome(_events);
+
+    String statusText;
+    Color statusColor;
+    if (closed) {
+      statusText = outcomeStatus('lost');
+      statusColor = const Color(0xFFC0392B);
+    } else if (done) {
+      statusText = 'Completed';
+      statusColor = _green;
+    } else if (outcome == 'workable' && _steps[cur].key == 'client_ok') {
+      statusText = outcomeStatus('workable');
+      statusColor = _gold;
+    } else {
+      statusText = _steps[cur].label;
+      statusColor = _roleColor(_steps[cur].owner);
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xFFF0F2F5),
@@ -365,25 +496,47 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
               ),
               const SizedBox(height: 14),
 
-              // Temporary role selector
+              // Signed-in account — this is who you are and what you can act on.
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Row(
                   children: [
-                    const Text('Acting as  (temporary — until login roles are added)',
-                        style: TextStyle(color: _grey, fontSize: 11.5, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        for (final r in const ['sales', 'hos', 'eng']) _rolePill(r),
-                      ],
+                    Icon(Icons.badge_outlined, size: 18, color: _roleColor(_activeRole)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(Session.name.isEmpty ? 'Signed in' : Session.name,
+                              style: const TextStyle(
+                                  color: _navy, fontSize: 13, fontWeight: FontWeight.w700)),
+                          Text('Acting as ${_roleLabel(_activeRole)}',
+                              style: const TextStyle(color: _grey, fontSize: 11.5)),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: _roleColor(_activeRole).withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(_roleLabel(_activeRole),
+                          style: TextStyle(
+                              color: _roleColor(_activeRole),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700)),
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 14),
+
+              if (closed) ...[
+                _closedBanner(),
+                const SizedBox(height: 14),
+              ],
 
               // Timeline
               Container(
@@ -409,46 +562,12 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
     );
   }
 
-  Widget _rolePill(String r) {
-    final sel = _activeRole == r;
-    final c = _roleColor(r);
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.only(right: 8),
-        child: GestureDetector(
-          onTap: () => setState(() => _activeRole = r),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 6),
-            decoration: BoxDecoration(
-              color: sel ? c : const Color(0xFFFAFBFE),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: sel ? c : _line),
-            ),
-            child: Column(
-              children: [
-                Text(_roleLabel(r),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                        color: sel ? Colors.white : const Color(0xFF555555),
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700)),
-                const SizedBox(height: 1),
-                Text(_roleHint(r),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                        color: sel ? Colors.white70 : _grey, fontSize: 9.5)),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _stepRow(int i, int cur) {
     final s = _steps[i];
+    final closed = ticketIsClosed(_events);
+    final outcome = ticketOutcome(_events);
     final isDone = _doneKeys.contains(s.key);
-    final isCur = i == cur;
+    final isCur = i == cur && !closed;
     final last = i == _steps.length - 1;
     final ev = _eventFor(s.key);
 
@@ -524,6 +643,8 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
                         Text(_doneSubtitle(ev),
                             style: const TextStyle(color: _grey, fontSize: 11.5)),
                       ],
+                      if (isCur && s.key == 'client_ok' && outcome == 'workable')
+                        _workableNote(),
                       if (isCur) _actionFor(s),
                     ],
                   ),
@@ -541,7 +662,9 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
     final by = '${ev['by'] ?? ''}';
     final v = '${ev['value'] ?? ''}';
     final vs = v.isEmpty ? '' : (_looksIso(v) ? ' · ${_fmtDate(v)}' : ' · $v');
-    return '${_fmtDateTime(t)} · by $by$vs';
+    final note = '${ev['note'] ?? ''}';
+    final ns = note.isEmpty ? '' : ' · “$note”';
+    return '${_fmtDateTime(t)} · by $by$vs$ns';
   }
 
   Widget _ownerBadge(String owner) {
@@ -555,7 +678,7 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
   }
 
   Widget _actionFor(_Step s) {
-    final mine = _activeRole == s.owner;
+    final mine = canActOn(_activeRole, s.owner);
     if (!mine) {
       return Container(
         margin: const EdgeInsets.only(top: 10),
@@ -588,6 +711,9 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
         break;
       case 'choice':
         label = 'Record outcome';
+        break;
+      case 'outcome':
+        label = 'Record client decision';
         break;
       case 'deliverable':
         label = 'Submit quotation';
@@ -624,6 +750,73 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
               child: Text('Photo upload to Google Drive arrives in the next phase.',
                   style: TextStyle(color: _grey, fontSize: 11)),
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _workableNote() {
+    Map<String, dynamic>? w;
+    for (final e in _events) {
+      if ('${e['outcome'] ?? ''}' == 'workable') w = e;
+    }
+    final t = w == null ? '' : _fmtDateTime('${w['time'] ?? ''}');
+    final by = w == null ? '' : '${w['by'] ?? ''}';
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(11),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7E6),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFF0DCA0)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.timelapse, size: 15, color: Color(0xFF8A6200)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              w == null
+                  ? 'Currently workable — record the decision again once the client commits.'
+                  : 'Marked workable · $t · by $by — record again once the client decides.',
+              style: const TextStyle(color: Color(0xFF8A6200), fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _closedBanner() {
+    final reason = ticketLostReason(_events);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFCEBEA),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE6B7B2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.cancel, color: Color(0xFFC0392B), size: 18),
+              SizedBox(width: 8),
+              Text('Did Not Push Through',
+                  style: TextStyle(
+                      color: Color(0xFFC0392B), fontWeight: FontWeight.bold, fontSize: 14)),
+            ],
+          ),
+          if (reason.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text('Reason: $reason',
+                style: const TextStyle(color: Color(0xFF7A2820), fontSize: 12.5)),
+          ],
+          const SizedBox(height: 6),
+          const Text('This ticket is closed.',
+              style: TextStyle(color: Color(0xFF7A2820), fontSize: 11.5)),
         ],
       ),
     );

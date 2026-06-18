@@ -87,8 +87,17 @@ class BookingService {
           .get(Uri.parse(kBookingListUrl))
           .timeout(const Duration(seconds: 30));
       if (res.statusCode != 200) return [];
-      final d = jsonDecode(res.body);
-      final list = d is Map ? d['bookings'] : d;
+      var d = jsonDecode(res.body);
+
+      // n8n's "Respond With" can return the payload a few different ways:
+      //   {ok:true, bookings:[...]}            ← First Incoming Item (ideal)
+      //   [{ok:true, bookings:[...]}]          ← All Incoming Items (wrapped)
+      //   [ {booking}, {booking} ]             ← bare array of rows
+      // Unwrap any single-object array first, then pull out `bookings`.
+      if (d is List && d.length == 1 && d.first is Map && (d.first as Map).containsKey('bookings')) {
+        d = d.first;
+      }
+      final list = (d is Map && d['bookings'] is List) ? d['bookings'] : d;
       if (list is List) {
         return list
             .whereType<Map>()

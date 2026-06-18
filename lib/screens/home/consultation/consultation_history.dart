@@ -1,12 +1,12 @@
-// lib/screens/home/consultation/consultation_history_screen.dart
+// lib/screens/home/consultation/consultation_history.dart
 //
 // Shopee-style "completed orders" list of consultation tickets. Each row shows
 // the client name, ticket (booking) ref, creation date, assigned sales agent,
 // and current status. Search + filter by client name / agent / ref / date.
 
 import 'package:flutter/material.dart';
-import '../../../services/booking_service.dart';
-import 'consultation_ticket.dart';
+import 'package:apollo_solar_consultation_app/services/booking_service.dart';
+import 'package:apollo_solar_consultation_app/screens/home/consultation/consultation_ticket.dart';
 
 const _navy = Color(0xFF1A2A6C);
 const _gold = Color(0xFFC8A200);
@@ -45,8 +45,13 @@ class _ConsultationHistoryScreenState extends State<ConsultationHistoryScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final items = await BookingService.listBookings();
-    items.sort((a, b) =>
-        '${_createdStr(b)}'.compareTo('${_createdStr(a)}')); // newest first
+    items.sort((a, b) {
+      final da = _created(a), db = _created(b);
+      if (da == null && db == null) return 0;
+      if (da == null) return 1; // undated sinks to the bottom
+      if (db == null) return -1;
+      return db.compareTo(da); // newest first
+    });
     if (!mounted) return;
     setState(() {
       _all = items;
@@ -55,7 +60,22 @@ class _ConsultationHistoryScreenState extends State<ConsultationHistoryScreen> {
   }
 
   String _createdStr(Map b) => '${b['createdAt'] ?? b['updatedAt'] ?? ''}';
-  DateTime? _created(Map b) => DateTime.tryParse(_createdStr(b));
+  DateTime? _created(Map b) => _parseDt(_createdStr(b));
+
+  // Tolerant parser. Handles ISO ("2026-06-19T01:56:54.118Z") AND the format
+  // Google Sheets hands back ("2026-06-19 1:56:54" — space separator and an
+  // UNPADDED hour for times before 10am), which DateTime.tryParse rejects.
+  static DateTime? _parseDt(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return null;
+    final direct = DateTime.tryParse(s);
+    if (direct != null) return direct;
+    final m = RegExp(r'^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?')
+        .firstMatch(s);
+    if (m == null) return null;
+    int g(int i, [int d = 0]) => int.tryParse(m.group(i) ?? '') ?? d;
+    return DateTime(g(1), g(2), g(3), g(4), g(5), g(6));
+  }
 
   // ── Filtering ──
   String _fieldValue(Map b) {
