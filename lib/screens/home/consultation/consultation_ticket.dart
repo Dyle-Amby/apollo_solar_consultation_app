@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:apollo_solar_consultation_app/services/booking_service.dart';
 import 'package:apollo_solar_consultation_app/services/session.dart';
 import 'package:apollo_solar_consultation_app/services/ticket_pipeline.dart';
+import 'package:apollo_solar_consultation_app/screens/home/consultation/consultation_details.dart';
 
 const _navy = Color(0xFF1A2A6C);
 const _gold = Color(0xFFC8A200);
@@ -110,6 +111,18 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
     return '${_months[d.month - 1]} ${d.day}, ${d.year}';
   }
   bool _looksIso(String s) => RegExp(r'^\d{4}-\d{2}-\d{2}').hasMatch(s);
+
+  // ── View / edit the original consultation ──
+  Future<void> _openDetails() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ConsultationDetailsScreen(booking: widget.booking),
+      ),
+    );
+    // The details screen edits widget.booking in place on save, so refresh
+    // this ticket to reflect any name / detail changes.
+    if (mounted) setState(() {});
+  }
 
   // ── Advancing a step ──
   Future<void> _advance(_Step s) async {
@@ -455,43 +468,61 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
           ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              // Ticket summary
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('${b['client'] ?? 'Walk-in lead'}'.isEmpty ? 'Walk-in lead' : '${b['client']}',
-                                  style: const TextStyle(color: _navy, fontSize: 20, fontWeight: FontWeight.bold)),
-                              Text('${b['ref'] ?? ''}',
-                                  style: const TextStyle(color: _grey, fontSize: 12.5, fontWeight: FontWeight.w600)),
-                            ],
+              // Ticket summary — tap to view / edit the original consultation
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _openDetails,
+                child: Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('${b['client'] ?? 'Walk-in lead'}'.isEmpty ? 'Walk-in lead' : '${b['client']}',
+                                    style: const TextStyle(color: _navy, fontSize: 20, fontWeight: FontWeight.bold)),
+                                Text('${b['ref'] ?? ''}',
+                                    style: const TextStyle(color: _grey, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                              ],
+                            ),
                           ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: statusColor.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(20),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: statusColor.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(statusText,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.w700)),
                           ),
-                          child: Text(statusText,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.w700)),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Text('Sales Agent: ${('${b['agent'] ?? ''}'.isEmpty) ? 'Unassigned' : b['agent']}',
-                        style: const TextStyle(color: Color(0xFF555555), fontSize: 12.5)),
-                  ],
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text('Sales Agent: ${('${b['agent'] ?? ''}'.isEmpty) ? 'Unassigned' : b['agent']}',
+                          style: const TextStyle(color: Color(0xFF555555), fontSize: 12.5)),
+                      const SizedBox(height: 12),
+                      const Divider(height: 1),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: const [
+                          Icon(Icons.touch_app_outlined, size: 15, color: _gold),
+                          SizedBox(width: 6),
+                          Expanded(
+                            child: Text('Tap to view / edit consultation details',
+                                style: TextStyle(color: _navy, fontSize: 12, fontWeight: FontWeight.w600)),
+                          ),
+                          Icon(Icons.chevron_right, size: 18, color: _gold),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 14),
