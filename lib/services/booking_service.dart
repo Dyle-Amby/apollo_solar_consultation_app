@@ -26,6 +26,16 @@ const String kBookingStatusUrl = kBookingListUrl;
 const String kConsultationBookedUrl =
     'https://bernard100.app.n8n.cloud/webhook/consultation-booked';
 
+// Creates (or finds) the ticket's Google Drive folder named "ClientName-RefNo".
+// Called once when a ticket is first booked; returns {folderId, folderUrl}.
+const String kFolderCreateUrl =
+    'https://bernard100.app.n8n.cloud/webhook/apollo-folder-create';
+// Uploads one file (PDF or photo) into the ticket's Drive folder and returns
+// its view + download links. Does NOT touch the Consultations row — the app
+// folds the returned link into the booking and persists it via save().
+const String kDeliverableUploadUrl =
+    'https://bernard100.app.n8n.cloud/webhook/apollo-deliverable-upload';
+
 // NOTE: the old 6-stage kStages / stageLabel / stageIndex helpers were removed.
 // The pipeline now lives in lib/services/ticket_pipeline.dart (21 steps, role
 // ownership, canActOn). Use that as the single source of truth for stages.
@@ -125,6 +135,74 @@ class BookingService {
       return res.statusCode == 200;
     } catch (_) {
       return false;
+    }
+  }
+
+  /// Create (or find) the ticket's Google Drive folder "ClientName-RefNo".
+  /// Best-effort: returns {folderId, folderUrl} on success, null otherwise.
+  /// A null result never blocks booking — the upload webhook re-creates the
+  /// folder if it's still missing when the first file is attached.
+  static Future<Map<String, dynamic>?> createFolder(String ref, String client) async {
+    try {
+      final res = await http
+          .post(
+            Uri.parse(kFolderCreateUrl),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'ref': ref, 'client': client}),
+          )
+          .timeout(const Duration(seconds: 30));
+      if (res.statusCode != 200) return null;
+      final d = jsonDecode(res.body);
+      if (d is Map && d['ok'] == true) return Map<String, dynamic>.from(d);
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Upload one deliverable (PDF or photo, base64-encoded) into the ticket's
+  /// Drive folder. Returns {url, downloadUrl, name, folderId} on success, else
+  /// null with [lastError] set. The caller folds the link into the booking and
+  /// persists it with [save] (single writer for the row).
+  static Future<Map<String, dynamic>?> uploadDeliverable({
+    required String ref,
+    required String type,
+    required String filename,
+    required String mimeType,
+    required String dataBase64,
+    String folderId = '',
+    String client = '',
+  }) async {
+    lastError = '';
+    try {
+      final res = await http
+          .post(
+            Uri.parse(kDeliverableUploadUrl),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'ref': ref,
+              'type': type,
+              'filename': filename,
+              'mimeType': mimeType,
+              'dataBase64': dataBase64,
+              // Lets the webhook drop the file straight into the known folder;
+              // if blank it finds/creates "client-ref" as a fallback.
+              'folderId': folderId,
+              'client': client,
+            }),
+          )
+          .timeout(const Duration(seconds: 90)); // uploads can be slow on mobile
+      if (res.statusCode != 200) {
+        lastError = 'HTTP ${res.statusCode} from $kDeliverableUploadUrl\n${_short(res.body)}';
+        return null;
+      }
+      final d = jsonDecode(res.body);
+      if (d is Map && d['ok'] == true) return Map<String, dynamic>.from(d);
+      lastError = 'Upload reached n8n (200) but response was not {ok:true}:\n${_short(res.body)}';
+      return null;
+    } catch (e) {
+      lastError = '$e';
+      return null;
     }
   }
 }

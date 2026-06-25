@@ -223,7 +223,18 @@ class _FinalizeScreenState extends State<FinalizeScreen> {
 
   Future<void> _save() async {
     setState(() => _saving = true);
-    final ok = await BookingService.save(_payload());
+
+    // Create the ticket's Google Drive folder ("ClientName-RefNo") once, at
+    // booking time. Best-effort: if it fails (offline), booking still proceeds
+    // and the folder is created on the first deliverable upload instead.
+    final folder = await BookingService.createFolder(_ref, widget.data.fullName);
+    final payload = _payload();
+    if (folder != null) {
+      payload['driveFolderId'] = '${folder['folderId'] ?? ''}';
+      payload['driveFolderUrl'] = '${folder['folderUrl'] ?? ''}';
+    }
+
+    final ok = await BookingService.save(payload);
     if (!mounted) return;
     setState(() => _saving = false);
 

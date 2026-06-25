@@ -153,3 +153,51 @@ String ticketLostReason(dynamic eventsRaw) {
   }
   return reason;
 }
+
+// ── Deliverables (files attached to specific steps) ───────────────────────────
+// Some steps can't be completed until a file is attached:
+//   ocular_quote   → the Final Quotation PDF (engineering submits; HoS reviews)
+//   pod            → a Proof-of-Delivery photo
+//   install_photos → Before / During / After photos
+// Files live in the ticket's Google Drive folder (ClientName-RefNo). The row's
+// Deliverables JSON column stores the links, keyed by the type-keys below.
+const Map<String, List<String>> kStepDeliverables = {
+  'ocular_quote': ['quotation'],
+  'pod': ['proof_delivery'],
+  'install_photos': ['install_before', 'install_during', 'install_after'],
+};
+
+const Map<String, String> kDeliverableLabels = {
+  'quotation': 'Final Quotation (PDF)',
+  'proof_delivery': 'Proof of Delivery',
+  'install_before': 'Before',
+  'install_during': 'During',
+  'install_after': 'After',
+};
+
+/// The deliverable type-keys a step requires (empty if it needs no file).
+List<String> stepDeliverableKeys(TicketStep s) => kStepDeliverables[s.key] ?? const [];
+
+bool stepNeedsDeliverable(TicketStep s) => stepDeliverableKeys(s).isNotEmpty;
+
+/// Parse the Deliverables column (a JSON object keyed by type) into a map.
+Map<String, dynamic> parseDeliverables(dynamic raw) {
+  try {
+    if (raw is String && raw.isNotEmpty) {
+      final d = jsonDecode(raw);
+      if (d is Map) return Map<String, dynamic>.from(d);
+    } else if (raw is Map) {
+      return Map<String, dynamic>.from(raw);
+    }
+  } catch (_) {}
+  return {};
+}
+
+/// True once every file a step requires has a non-empty url in [deliverables].
+bool stepDeliverablesSatisfied(TicketStep s, Map<String, dynamic> deliverables) {
+  for (final k in stepDeliverableKeys(s)) {
+    final v = deliverables[k];
+    if (v is! Map || '${v['url'] ?? ''}'.trim().isEmpty) return false;
+  }
+  return true;
+}

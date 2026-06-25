@@ -10,7 +10,12 @@
 // once accounts carry a role.
 
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:apollo_solar_consultation_app/services/booking_service.dart';
 import 'package:apollo_solar_consultation_app/services/session.dart';
 import 'package:apollo_solar_consultation_app/services/ticket_pipeline.dart';
@@ -57,6 +62,7 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
   String _activeRole = 'sales';
   bool _saving = false;
   List<Map<String, dynamic>> _events = [];
+  Map<String, dynamic> _deliverables = {};
 
   @override
   void initState() {
@@ -65,6 +71,7 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
     // selector (handy while testing before everyone has a role set).
     if (Session.role.isNotEmpty) _activeRole = Session.role;
     _events = _parseEvents(widget.booking['events']);
+    _deliverables = parseDeliverables(widget.booking['deliverables']);
   }
 
   List<Map<String, dynamic>> _parseEvents(dynamic raw) {
@@ -154,18 +161,263 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
         value = c;
         break;
       case 'deliverable':
-        value = 'Quotation submitted';
-        break;
+        await _attachQuotation(s);
+        return;
       case 'photo':
-        value = 'Proof of delivery — photo upload pending Drive integration';
-        break;
+        await _handlePod(s);
+        return;
       case 'photos':
-        value = 'Before / During / After — photo upload pending Drive integration';
-        break;
+        // The install_photos step uses its own inline Before/During/After UI
+        // (see _installPhotosAction); the generic advance path isn't used.
+        return;
       default:
         value = '';
     }
     await _persist(s, value);
+  }
+
+  // Pick a PDF, upload it to the ticket's Drive folder, record the link under
+  // the step's deliverable key, then advance the step. The Final Quotation step
+  // can't complete without this file, so attaching IS the action.
+  Future<void> _attachQuotation(_Step s) async {
+    final keys = stepDeliverableKeys(s);
+    final type = keys.isNotEmpty ? keys.first : 'quotation';
+
+    FilePickerResult? picked;
+    try {
+      picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['pdf'],
+        withData: true, // we need the bytes to base64-encode for the webhook
+      );
+    } catch (e) {
+      _toast('Could not open file picker: $e', error: true);
+      return;
+    }
+    if (picked == null || picked.files.isEmpty) return; // cancelled
+
+    final file = picked.files.first;
+    final bytes = file.bytes;
+    if (bytes == null) {
+      _toast('Could not read the selected file.', error: true);
+      return;
+    }
+    final name = file.name.isEmpty ? 'Quotation.pdf' : file.name;
+
+    setState(() => _saving = true);
+    final result = await BookingService.uploadDeliverable(
+      ref: '${widget.booking['ref'] ?? ''}',
+      type: type,
+      filename: name,
+      mimeType: 'application/pdf',
+      dataBase64: base64Encode(bytes),
+      folderId: '${widget.booking['driveFolderId'] ?? ''}',
+      client: '${widget.booking['client'] ?? ''}',
+    );
+    if (!mounted) return;
+
+    if (result == null) {
+      setState(() => _saving = false);
+      _uploadErrorDialog();
+      return;
+    }
+
+    // Record the link locally; _commit re-sends the whole Deliverables map so
+    // it survives the upsert. If n8n had to (re)create the folder, capture it.
+    _deliverables[type] = {
+      'url': '${result['url'] ?? ''}',
+      'downloadUrl': '${result['downloadUrl'] ?? result['url'] ?? ''}',
+      'name': '${result['name'] ?? name}',
+      'by': Session.name.isNotEmpty ? Session.name : _roleLabel(_activeRole),
+      'at': DateTime.now().toIso8601String(),
+    };
+    final fid = '${result['folderId'] ?? ''}';
+    final furl = '${result['folderUrl'] ?? ''}';
+    if (fid.isNotEmpty) widget.booking['driveFolderId'] = fid;
+    if (furl.isNotEmpty) widget.booking['driveFolderUrl'] = furl;
+
+    // _saving is reset inside _commit; advance the step now.
+    await _persist(s, 'Quotation submitted: $name');
+  }
+
+  Future<void> _openUrl(String url) async {
+    if (url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) {
+      _toast('Invalid link.', error: true);
+      return;
+    }
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) _toast('Could not open the link.', error: true);
+  }
+
+  void _toast(String msg, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: error ? Colors.red.shade700 : null),
+    );
+  }
+
+  void _uploadErrorDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Upload failed'),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            BookingService.lastError.isEmpty ? 'Unknown error.' : BookingService.lastError,
+            style: const TextStyle(fontSize: 12.5),
+          ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  // ── Photo deliverables (Proof of Delivery, Install Before/During/After) ──
+  Future<ImageSource?> _pickImageSource() async {
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Add a photo',
+                  style: TextStyle(color: _navy, fontWeight: FontWeight.bold, fontSize: 15)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera, color: _navy),
+              title: const Text('Take photo'),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: _navy),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Capture (or pick) one image, compress to ~1 MB, upload it under [type].
+  /// Records the link in _deliverables on success and returns true. Leaves
+  /// _saving = true on success so the caller's save resets it.
+  Future<bool> _captureAndUpload(String type, String namePrefix) async {
+    final source = await _pickImageSource();
+    if (source == null) return false;
+
+    XFile? shot;
+    try {
+      shot = await ImagePicker().pickImage(
+        source: source,
+        maxWidth: 2400,
+        imageQuality: 88,
+        preferredCameraDevice: CameraDevice.rear,
+      );
+    } catch (e) {
+      _toast('Could not open camera/gallery: $e', error: true);
+      return false;
+    }
+    if (shot == null) return false; // cancelled
+
+    Uint8List bytes;
+    try {
+      final raw = await shot.readAsBytes();
+      bytes = await FlutterImageCompress.compressWithList(
+        raw,
+        minWidth: 1280,
+        minHeight: 1280,
+        quality: 68, // ~1 MB for a typical phone photo
+      );
+    } catch (e) {
+      _toast('Could not process the photo: $e', error: true);
+      return false;
+    }
+
+    final ref = '${widget.booking['ref'] ?? ''}';
+    final stamp = DateTime.now().toIso8601String().replaceAll(RegExp(r'[:.]'), '-');
+    final fname = '${namePrefix}_${ref}_$stamp.jpg';
+
+    setState(() => _saving = true);
+    final result = await BookingService.uploadDeliverable(
+      ref: ref,
+      type: type,
+      filename: fname,
+      mimeType: 'image/jpeg',
+      dataBase64: base64Encode(bytes),
+      folderId: '${widget.booking['driveFolderId'] ?? ''}',
+      client: '${widget.booking['client'] ?? ''}',
+    );
+    if (!mounted) return false;
+    if (result == null) {
+      setState(() => _saving = false);
+      _uploadErrorDialog();
+      return false;
+    }
+
+    _deliverables[type] = {
+      'url': '${result['url'] ?? ''}',
+      'downloadUrl': '${result['downloadUrl'] ?? result['url'] ?? ''}',
+      'name': '${result['name'] ?? fname}',
+      'by': Session.name.isNotEmpty ? Session.name : _roleLabel(_activeRole),
+      'at': DateTime.now().toIso8601String(),
+    };
+    final fid = '${result['folderId'] ?? ''}';
+    if (fid.isNotEmpty) widget.booking['driveFolderId'] = fid;
+    return true;
+  }
+
+  // Proof of Delivery: one photo completes the step.
+  Future<void> _handlePod(_Step s) async {
+    final ok = await _captureAndUpload('proof_delivery', 'ProofOfDelivery');
+    if (!ok) {
+      if (mounted) setState(() => _saving = false);
+      return;
+    }
+    await _persist(s, 'Proof of delivery photo uploaded');
+  }
+
+  // Install photos: each capture saves WITHOUT advancing; the step only
+  // completes once all three (before/during/after) are attached.
+  Future<void> _captureInstallPhoto(String type) async {
+    final label = (kDeliverableLabels[type] ?? 'Photo').replaceAll(' ', '');
+    final ok = await _captureAndUpload(type, 'Install$label');
+    if (!mounted) return;
+    if (!ok) {
+      setState(() => _saving = false);
+      return;
+    }
+    await _saveDeliverablesOnly();
+  }
+
+  Future<void> _completeInstallPhotos(_Step s) async {
+    if (!stepDeliverablesSatisfied(s, _deliverables)) {
+      _toast('Add the Before, During and After photos first.', error: true);
+      return;
+    }
+    await _persist(s, 'Before / During / After photos uploaded');
+  }
+
+  // Re-save the row with the current events (no new step) so an updated
+  // _deliverables map is persisted without advancing the pipeline.
+  Future<void> _saveDeliverablesOnly() async {
+    final doneNow = _events.map((e) => '${e['stepKey']}').toSet();
+    String statusLabel = 'Completed';
+    int stageIdx = _steps.length;
+    for (int i = 0; i < _steps.length; i++) {
+      if (!doneNow.contains(_steps[i].key)) {
+        statusLabel = _steps[i].label;
+        stageIdx = i;
+        break;
+      }
+    }
+    final ownerNow = stageIdx < _steps.length ? _steps[stageIdx].owner : '';
+    await _commit(_events, statusLabel, stageIdx, ownerNow);
   }
 
   Future<String?> _textDialog() async {
@@ -388,6 +640,11 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
       'currentOwner': ownerNow,
       'events': jsonEncode(newEvents),
       'consultation': b['consultation'] ?? '', // preserve snapshot
+      // Files attached to steps (quotation PDF, delivery / install photos) and
+      // the ticket's Drive folder — re-sent every upsert so they're never wiped.
+      'deliverables': jsonEncode(_deliverables),
+      'driveFolderId': b['driveFolderId'] ?? '',
+      'driveFolderUrl': b['driveFolderUrl'] ?? '',
       // Re-send the ORIGINAL creation time + flat display fields so the upsert
       // doesn't reset the Sheet's Created/readable columns on each step.
       'createdAt': b['createdAt'] ?? '',
@@ -674,6 +931,8 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
                         Text(_doneSubtitle(ev),
                             style: const TextStyle(color: _grey, fontSize: 11.5)),
                       ],
+                      if (stepNeedsDeliverable(s) && _hasAnyDeliverable(s) && !isCur)
+                        _deliverableView(s),
                       if (isCur && s.key == 'client_ok' && outcome == 'workable')
                         _workableNote(),
                       if (isCur) _actionFor(s),
@@ -747,43 +1006,205 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
         label = 'Record client decision';
         break;
       case 'deliverable':
-        label = 'Submit quotation';
+        label = 'Attach quotation (PDF)';
         break;
       case 'photo':
-      case 'photos':
-        label = 'Mark done (photos: Drive soon)';
+        label = 'Take delivery photo';
         break;
+      case 'photos':
+        // Handled by its own multi-photo UI above.
+        return _installPhotosAction(s);
       default:
         label = 'Mark “${s.label}” done';
     }
 
-    final isPhoto = s.input == 'photo' || s.input == 'photos';
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: SizedBox(
+        height: 42,
+        child: ElevatedButton(
+          onPressed: _saving ? null : () => _advance(s),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _roleColor(s.owner),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+          ),
+          child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+        ),
+      ),
+    );
+  }
+
+  // Before / During / After capture tiles + a gated "complete" button.
+  Widget _installPhotosAction(_Step s) {
+    final types = stepDeliverableKeys(s);
+    final ready = stepDeliverablesSatisfied(s, _deliverables);
     return Padding(
       padding: const EdgeInsets.only(top: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          for (final t in types) _installTile(t),
+          const SizedBox(height: 4),
           SizedBox(
+            width: double.infinity,
             height: 42,
             child: ElevatedButton(
-              onPressed: _saving ? null : () => _advance(s),
+              onPressed: (_saving || !ready) ? null : () => _completeInstallPhotos(s),
               style: ElevatedButton.styleFrom(
-                backgroundColor: _roleColor(s.owner),
+                backgroundColor: ready ? _roleColor(s.owner) : const Color(0xFFB8BECC),
                 foregroundColor: Colors.white,
+                disabledBackgroundColor: const Color(0xFFB8BECC),
+                disabledForegroundColor: Colors.white,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
               ),
-              child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+              child: Text(ready ? 'Submit installation photos' : 'Add all three photos first',
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
             ),
           ),
-          if (isPhoto)
-            const Padding(
-              padding: EdgeInsets.only(top: 6),
-              child: Text('Photo upload to Google Drive arrives in the next phase.',
-                  style: TextStyle(color: _grey, fontSize: 11)),
+        ],
+      ),
+    );
+  }
+
+  Widget _installTile(String type) {
+    final v = _deliverables[type];
+    final has = v is Map && '${v['url'] ?? ''}'.trim().isNotEmpty;
+    final label = kDeliverableLabels[type] ?? type;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
+      decoration: BoxDecoration(
+        color: has ? const Color(0xFFEAF7F0) : const Color(0xFFF4F6FB),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: has ? const Color(0xFF9FD9BE) : const Color(0xFFDDE3F0)),
+      ),
+      child: Row(
+        children: [
+          Icon(has ? Icons.check_circle : Icons.photo_camera_outlined,
+              size: 18, color: has ? _green : _navy),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(label,
+                style: TextStyle(
+                    color: has ? _green : _navy, fontSize: 13, fontWeight: FontWeight.w700)),
+          ),
+          if (has) ...[
+            TextButton(
+              onPressed: () => _openUrl('${v['url']}'),
+              child: const Text('View'),
+            ),
+            TextButton(
+              onPressed: _saving ? null : () => _captureInstallPhoto(type),
+              child: const Text('Retake'),
+            ),
+          ] else
+            ElevatedButton(
+              onPressed: _saving ? null : () => _captureInstallPhoto(type),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _navy,
+                foregroundColor: Colors.white,
+                visualDensity: VisualDensity.compact,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Add'),
             ),
         ],
       ),
     );
+  }
+
+  bool _hasAnyDeliverable(_Step s) {
+    for (final k in stepDeliverableKeys(s)) {
+      final v = _deliverables[k];
+      if (v is Map && '${v['url'] ?? ''}'.trim().isNotEmpty) return true;
+    }
+    return false;
+  }
+
+  Widget _deliverableView(_Step s) {
+    final tiles = <Widget>[];
+    for (final k in stepDeliverableKeys(s)) {
+      final v = _deliverables[k];
+      if (v is! Map) continue;
+      final url = '${v['url'] ?? ''}';
+      if (url.trim().isEmpty) continue;
+      final dl = '${v['downloadUrl'] ?? url}';
+      final name = '${v['name'] ?? kDeliverableLabels[k] ?? 'File'}';
+      final by = '${v['by'] ?? ''}';
+      tiles.add(Container(
+        margin: const EdgeInsets.only(top: 8),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF4F6FB),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFDDE3F0)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.description_outlined, size: 18, color: _navy),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(kDeliverableLabels[k] ?? k,
+                          style: const TextStyle(
+                              color: _navy, fontSize: 12.5, fontWeight: FontWeight.w700)),
+                      Text(name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: _grey, fontSize: 11)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _openUrl(url),
+                    icon: const Icon(Icons.visibility_outlined, size: 16),
+                    label: const Text('View'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _navy,
+                      side: const BorderSide(color: _navy),
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _openUrl(dl),
+                    icon: const Icon(Icons.download_outlined, size: 16),
+                    label: const Text('Download'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _green,
+                      side: const BorderSide(color: _green),
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (by.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text('Submitted by $by',
+                    style: const TextStyle(color: _grey, fontSize: 10.5)),
+              ),
+          ],
+        ),
+      ));
+    }
+    if (tiles.isEmpty) return const SizedBox.shrink();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: tiles);
   }
 
   Widget _workableNote() {
