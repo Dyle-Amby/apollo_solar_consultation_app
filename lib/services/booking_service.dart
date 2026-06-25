@@ -14,6 +14,12 @@ import 'package:http/http.dart' as http;
 
 const String kBookingUpdateUrl =
     'https://bernard100.app.n8n.cloud/webhook/apollo-booking-update';
+// Fires once at finalize: creates the Drive folder AND appends the row in one
+// atomic call (folder guaranteed before the row is written). Returns
+// {ok, folderId, folderUrl}; ok:false means the folder failed and NO row was
+// written (hard-fail) — the booking should be retried.
+const String kBookingCreateUrl =
+    'https://bernard100.app.n8n.cloud/webhook/apollo-booking-create';
 const String kBookingListUrl =
     'https://bernard100.app.n8n.cloud/webhook/apollo-booking-list';
 // The read workflow is a SINGLE webhook: with no query it returns all bookings;
@@ -69,6 +75,50 @@ class BookingService {
     } catch (e) {
       lastError = '$e';
       return false;
+    }
+  }
+
+  /// Fires ONCE at finalize: the create chain makes the Drive folder, then
+  /// appends the row with that folder baked in — one atomic call. Returns the
+  /// parsed {ok, folderId, folderUrl} on success, or null on failure (with
+  /// [lastError] set). null = hard-fail: the folder couldn't be made, so no row
+  /// was written and the user should retry. Every save AFTER booking uses
+  /// [save] (the update chain), which never touches the folder.
+  static Future<Map<String, dynamic>?> createBooking(Map<String, dynamic> payload) async {
+    lastError = '';
+    try {
+      final res = await http
+          .post(
+            Uri.parse(kBookingCreateUrl),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 45)); // folder + sheet write
+      if (res.statusCode != 200) {
+        lastError = 'HTTP ${res.statusCode} from $kBookingCreateUrl\n${_short(res.body)}';
+        return null;
+      }
+      final body = res.body.trim();
+      if (body.isEmpty) {
+        lastError = 'Booking reached n8n (HTTP 200) but the response was empty. '
+            'A node likely errored before the Respond node — check the n8n log.';
+        return null;
+      }
+      dynamic d;
+      try {
+        d = jsonDecode(body);
+      } catch (_) {
+        lastError = 'Booking returned a non-JSON response:\n${_short(body)}';
+        return null;
+      }
+      if (d is Map && d['ok'] == true) return Map<String, dynamic>.from(d);
+      lastError = (d is Map && d['error'] != null)
+          ? '${d['error']}'
+          : 'Booking could not be completed:\n${_short(body)}';
+      return null;
+    } catch (e) {
+      lastError = '$e';
+      return null;
     }
   }
 

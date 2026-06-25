@@ -224,22 +224,17 @@ class _FinalizeScreenState extends State<FinalizeScreen> {
   Future<void> _save() async {
     setState(() => _saving = true);
 
-    // Create the ticket's Google Drive folder ("ClientName-RefNo") once, at
-    // booking time. Best-effort: if it fails (offline), booking still proceeds
-    // and the folder is created on the first deliverable upload instead.
-    final folder = await BookingService.createFolder(_ref, widget.data.fullName);
-    final payload = _payload();
-    if (folder != null) {
-      payload['driveFolderId'] = '${folder['folderId'] ?? ''}';
-      payload['driveFolderUrl'] = '${folder['folderUrl'] ?? ''}';
-    }
-
-    final ok = await BookingService.save(payload);
+    // ONE atomic call: the create chain makes the "ClientName-RefNo" Drive
+    // folder, then appends the row with that folder baked in. If the folder
+    // can't be made, the whole booking fails (hard-fail) and nothing is written,
+    // so we never end up with a folderless ticket.
+    final result = await BookingService.createBooking(_payload());
+    final ok = result != null;
     if (!mounted) return;
     setState(() => _saving = false);
 
     if (ok) {
-      // Side-effects: confirmation email + Sheets log, only when a date exists.
+      // Email stays on its own untouched webhook; fire only when a date exists.
       if (!_tbf && _ocular != null) {
         BookingService.fireConsultationBooked(_bookedPayload());
       }
