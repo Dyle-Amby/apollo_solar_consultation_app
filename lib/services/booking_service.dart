@@ -196,9 +196,24 @@ class BookingService {
         lastError = 'HTTP ${res.statusCode} from $kDeliverableUploadUrl\n${_short(res.body)}';
         return null;
       }
-      final d = jsonDecode(res.body);
+      final body = res.body.trim();
+      if (body.isEmpty) {
+        lastError = 'Upload reached n8n (HTTP 200) but the response was empty. '
+            'This usually means a Drive node errored before the Respond node '
+            '(e.g. folder not found or wrong credential). Check the n8n execution log.';
+        return null;
+      }
+      dynamic d;
+      try {
+        d = jsonDecode(body);
+      } catch (_) {
+        lastError = 'Upload returned a non-JSON response:\n${_short(body)}';
+        return null;
+      }
       if (d is Map && d['ok'] == true) return Map<String, dynamic>.from(d);
-      lastError = 'Upload reached n8n (200) but response was not {ok:true}:\n${_short(res.body)}';
+      lastError = (d is Map && d['error'] != null)
+          ? '${d['error']}'
+          : 'Upload reached n8n (200) but response was not {ok:true}:\n${_short(body)}';
       return null;
     } catch (e) {
       lastError = '$e';
