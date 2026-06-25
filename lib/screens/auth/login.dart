@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:apollo_solar_consultation_app/services/auth_service.dart';
 import 'package:apollo_solar_consultation_app/screens/auth/registration.dart';
+// ⚠️ If your forgot-password file/class is named differently, fix THIS line and
+// the class name in _goForgot() below to match (e.g. ForgotPassScreen).
+import 'package:apollo_solar_consultation_app/screens/auth/forgot_pass.dart';
 import 'package:apollo_solar_consultation_app/screens/home/dashboard.dart';
 
 const _navy = Color(0xFF1A2A6C);
@@ -60,6 +63,13 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  void _goForgot() {
+    Navigator.of(context).push(
+      // ⚠️ Match this class name to whatever forgot_pass.dart actually exports.
+      MaterialPageRoute(builder: (_) => const ForgotPasswordScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -98,6 +108,19 @@ class _LoginScreenState extends State<LoginScreen> {
                             icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility, color: _grey),
                             onPressed: () => setState(() => _obscure = !_obscure),
                           )),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            minimumSize: const Size(0, 34),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          onPressed: _busy ? null : _goForgot,
+                          child: const Text('Forgot password?',
+                              style: TextStyle(color: _navy, fontSize: 13, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
                       if (_error.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         Text(_error, style: const TextStyle(color: Color(0xFFC0392B), fontSize: 12.5)),
