@@ -1,12 +1,15 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:apollo_solar_consultation_app/services/session.dart';
 import 'package:apollo_solar_consultation_app/services/booking_service.dart';
 import 'package:apollo_solar_consultation_app/services/ticket_pipeline.dart';
+import 'package:apollo_solar_consultation_app/services/notification_service.dart';
 import 'package:apollo_solar_consultation_app/screens/home/consultation/consultation_flow.dart';
 // NOTE: match these import names to your actual filenames.
 import 'package:apollo_solar_consultation_app/screens/auth/login.dart';
 import 'package:apollo_solar_consultation_app/screens/home/consultation/consultation_history.dart';
 import 'package:apollo_solar_consultation_app/screens/home/consultation/consultation_ticket.dart';
+import 'package:apollo_solar_consultation_app/screens/home/notification_screen.dart';
 
 const _navy = Color(0xFF1B2B6B);
 const _gold = Color(0xFFC8A200);
@@ -22,7 +25,7 @@ class DashboardPage extends StatefulWidget {
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage> {
+class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserver {
   bool _loading = true;
   List<Map<String, dynamic>> _all = [];
 
@@ -30,13 +33,31 @@ class _DashboardPageState extends State<DashboardPage> {
   int _awaiting = 0;
   int _inProgress = 0;
   int _completed = 0;
+  int _newCount = 0; // unseen items for the notification bell badge
   // tickets whose current step is owned by my role
   final List<Map<String, dynamic>> _pending = [];
+
+  Timer? _poll;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+    // Keep the badge live while the app is open (Tier 1 polling).
+    _poll = Timer.periodic(const Duration(seconds: 60), (_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _load();
   }
 
   Future<void> _load() async {
@@ -62,11 +83,15 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     if (!mounted) return;
+    final queue = NotificationService.queueFrom(items);
+    final newCount = await NotificationService.newCount(queue);
+    if (!mounted) return;
     setState(() {
       _all = items;
       _awaiting = awaiting;
       _inProgress = inProgress;
       _completed = completed;
+      _newCount = newCount;
       _pending
         ..clear()
         ..addAll(pending);
@@ -79,6 +104,44 @@ class _DashboardPageState extends State<DashboardPage> {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (context) => const LoginScreen()),
+    );
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+    );
+    if (mounted) _load(); // opening the inbox marks items seen → badge clears
+  }
+
+  Widget _bell() {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.notifications_outlined, color: Colors.white),
+          onPressed: _openNotifications,
+        ),
+        if (_newCount > 0)
+          Positioned(
+            top: 8,
+            right: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              constraints: const BoxConstraints(minWidth: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE53935),
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: _navy, width: 1.5),
+              ),
+              child: Text(
+                _newCount > 9 ? '9+' : '$_newCount',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -111,6 +174,7 @@ class _DashboardPageState extends State<DashboardPage> {
           ],
         ),
         actions: [
+          _bell(),
           IconButton(icon: const Icon(Icons.logout, color: Colors.white), onPressed: _logout),
         ],
       ),
