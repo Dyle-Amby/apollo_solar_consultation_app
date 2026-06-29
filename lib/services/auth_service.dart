@@ -22,9 +22,32 @@ import 'package:http/http.dart' as http;
 import 'package:apollo_solar_consultation_app/services/session.dart';
 
 const String kAuthUrl = 'https://bernard100.app.n8n.cloud/webhook/apollo-auth';
+// Returns all registered users as {name, email, role}, role normalized to
+// sales|hos|eng|hoe|admin. Used to populate the Engineering team picker.
+const String kUsersListUrl =
+    'https://bernard100.app.n8n.cloud/webhook/apollo-users-list';
 
 class AuthService {
   static String lastError = '';
+
+  /// All registered users as [{name, email, role}] (role already normalized).
+  /// Returns [] on any failure — callers fall back gracefully.
+  static Future<List<Map<String, dynamic>>> listUsers() async {
+    try {
+      final res = await http
+          .get(Uri.parse(kUsersListUrl))
+          .timeout(const Duration(seconds: 30));
+      if (res.statusCode != 200) return [];
+      final d = jsonDecode(res.body);
+      final raw = (d is Map && d['users'] is List)
+          ? d['users']
+          : (d is List ? d : const []);
+      return List<Map<String, dynamic>>.from(
+          raw.map((e) => Map<String, dynamic>.from(e as Map)));
+    } catch (_) {
+      return [];
+    }
+  }
 
   static Future<bool> login(String email, String password) {
     final id = email.trim();

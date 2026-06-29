@@ -18,6 +18,7 @@ import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:apollo_solar_consultation_app/services/booking_service.dart';
 import 'package:apollo_solar_consultation_app/services/session.dart';
+import 'package:apollo_solar_consultation_app/services/auth_service.dart';
 import 'package:apollo_solar_consultation_app/services/ticket_pipeline.dart';
 import 'package:apollo_solar_consultation_app/screens/home/consultation/consultation_details.dart';
 
@@ -148,12 +149,23 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
           lastDate: now.add(const Duration(days: 365)),
         );
         if (d == null) return;
-        value = d.toIso8601String();
+        if (!mounted) return;
+        final tod = await showTimePicker(
+          context: context,
+          initialTime: TimeOfDay.fromDateTime(now),
+        );
+        if (tod == null) return;
+        value = DateTime(d.year, d.month, d.day, tod.hour, tod.minute).toIso8601String();
         break;
       case 'text':
         final t = await _textDialog();
         if (t == null) return;
         value = t.isEmpty ? 'Team assigned' : t;
+        break;
+      case 'team':
+        final picked = await _assignTeamDialog();
+        if (picked == null) return;
+        value = picked;
         break;
       case 'choice':
         final c = await _choiceSheet();
@@ -418,6 +430,78 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
     }
     final ownerNow = stageIdx < _steps.length ? _steps[stageIdx].owner : '';
     await _commit(_events, statusLabel, stageIdx, ownerNow);
+  }
+
+  // Multi-select of registered Engineering users (role eng or hoe). Returns the
+  // chosen names comma-joined, or null if cancelled. Falls back to free text if
+  // no users can be loaded.
+  Future<String?> _assignTeamDialog() async {
+    setState(() => _saving = true);
+    final all = await AuthService.listUsers();
+    if (!mounted) return null;
+    setState(() => _saving = false);
+
+    final team = all.where((u) {
+      final r = '${u['role'] ?? ''}';
+      return r == 'eng' || r == 'hoe';
+    }).toList();
+
+    if (team.isEmpty) {
+      _toast('No Engineering users found — type the names instead.');
+      return _textDialog();
+    }
+
+    final selected = <String>{};
+    return showDialog<String>(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Assign Engineering Team'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 6),
+                  child: Text('Select all who will handle this installation:',
+                      style: TextStyle(fontSize: 12.5, color: _grey)),
+                ),
+                for (final u in team)
+                  CheckboxListTile(
+                    value: selected.contains('${u['name']}'),
+                    dense: true,
+                    activeColor: _navy,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: Text('${u['name'] ?? ''}',
+                        style: const TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: Text(
+                      '${u['role'] == 'hoe' ? 'Head of Engineering' : 'Engineering'} · ${u['email'] ?? ''}',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    onChanged: (v) => setLocal(() {
+                      final n = '${u['name']}';
+                      if (v == true) {
+                        selected.add(n);
+                      } else {
+                        selected.remove(n);
+                      }
+                    }),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: selected.isEmpty ? null : () => Navigator.pop(ctx, selected.join(', ')),
+              style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white),
+              child: Text('Assign (${selected.length})'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<String?> _textDialog() async {
@@ -951,7 +1035,7 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
     final t = '${ev['time'] ?? ''}';
     final by = '${ev['by'] ?? ''}';
     final v = '${ev['value'] ?? ''}';
-    final vs = v.isEmpty ? '' : (_looksIso(v) ? ' · ${_fmtDate(v)}' : ' · $v');
+    final vs = v.isEmpty ? '' : (_looksIso(v) ? ' · ${_fmtDateTime(v)}' : ' · $v');
     final note = '${ev['note'] ?? ''}';
     final ns = note.isEmpty ? '' : ' · “$note”';
     return '${_fmtDateTime(t)} · by $by$vs$ns';
@@ -998,6 +1082,9 @@ class _ConsultationTicketScreenState extends State<ConsultationTicketScreen> {
         break;
       case 'text':
         label = 'Assign team';
+        break;
+      case 'team':
+        label = 'Assign Engineering team';
         break;
       case 'choice':
         label = 'Record outcome';

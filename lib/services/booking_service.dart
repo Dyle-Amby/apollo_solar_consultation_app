@@ -63,7 +63,7 @@ class BookingService {
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode(payload),
           )
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 60));
       if (res.statusCode != 200) {
         lastError = 'HTTP ${res.statusCode} from $kBookingUpdateUrl\n${_short(res.body)}';
         return false;
@@ -93,7 +93,7 @@ class BookingService {
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode(payload),
           )
-          .timeout(const Duration(seconds: 45)); // folder + sheet write
+          .timeout(const Duration(seconds: 60)); // folder + sheet write
       if (res.statusCode != 200) {
         lastError = 'HTTP ${res.statusCode} from $kBookingCreateUrl\n${_short(res.body)}';
         return null;
@@ -127,7 +127,7 @@ class BookingService {
     try {
       final res = await http
           .get(Uri.parse('$kBookingStatusUrl?ref=${Uri.encodeQueryComponent(ref)}'))
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 60));
       if (res.statusCode != 200) return null;
       final d = jsonDecode(res.body);
       if (d is Map && d['found'] == true) {
@@ -145,7 +145,7 @@ class BookingService {
     try {
       final res = await http
           .get(Uri.parse(kBookingListUrl))
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 60));
       if (res.statusCode != 200) return [];
       var d = jsonDecode(res.body);
 
@@ -181,7 +181,7 @@ class BookingService {
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode(payload),
           )
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 60));
       return res.statusCode == 200;
     } catch (_) {
       return false;
@@ -200,7 +200,7 @@ class BookingService {
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({'ref': ref, 'client': client}),
           )
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 60));
       if (res.statusCode != 200) return null;
       final d = jsonDecode(res.body);
       if (d is Map && d['ok'] == true) return Map<String, dynamic>.from(d);

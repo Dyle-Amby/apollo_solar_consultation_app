@@ -41,7 +41,7 @@ const List<TicketStep> kTicketSteps = [
   TicketStep('install_date', 'Installation Date Booked', 'sales', input: 'date'),
 
   TicketStep('eng_assign', 'Assign Engineering Team', 'eng',
-      stageTitle: '5 · Engineering Approval', input: 'text'),
+      stageTitle: '5 · Engineering Approval', input: 'team'),
   TicketStep('eng_dates', 'Engineering Confirms / Adjusts Dates', 'eng', input: 'date'),
   TicketStep('hos_final', 'Head of Sales Final Approval', 'hos'),
 
