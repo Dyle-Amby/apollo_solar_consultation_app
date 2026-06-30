@@ -6,6 +6,14 @@ All backend communication goes through **n8n webhook endpoints** backed by **Goo
 
 ## Auth Endpoints
 
+### `Primary n8n URL` - From Sir Bernard's Workflow
+
+**URL :** `https://bernard100.app.n8n.cloud`
+
+### `Apollo Consultation Workflow URL` - The App's function is consolidated to one functional worflow
+
+**URL :** `https://bernard100.app.n8n.cloud/workflow/CMX358vkE6g97w3M`
+
 ### `POST apollo-auth` — Login & Register
 
 **URL:** `https://bernard100.app.n8n.cloud/webhook/apollo-auth`
