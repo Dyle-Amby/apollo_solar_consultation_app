@@ -12,10 +12,12 @@ point. The app (`booking_service.dart`) decides which webhook to call and when.
 | `apollo-booking-update` | Every status change / edit / deliverable save AFTER booking | Build row → **append-or-update by REF_CODE** → status history → respond `{ok:true}`. No folder logic. | `BookingService.save()` |
 | `apollo-booking-list` | Opening History, or one ticket | No `?ref` → all rows; `?ref=` → one. Maps sheet columns back to app keys. | `listBookings()`, `getByRef()` |
 | `apollo-deliverable-upload` | Attaching a PDF / photo to a step | Decode base64 → ensure folder (create-if-missing) → upload to Drive → respond links. Never writes the row (app does). | `uploadDeliverable()` |
+| `apollo-folder-create` | Edge-case folder recovery | Creates (or finds) the ticket's Drive folder by `ClientName-RefNo`. Best-effort — app proceeds even if this returns null (upload webhook re-creates if missing). | `BookingService.createFolder()` |
 | `consultation-booked` | After a successful booking with a date | Confirmation email (Gmail). **Leave untouched.** Fire-and-forget. | `fireConsultationBooked()` |
-| `apollo-auth` | Login / Register | Airtable user lookup/create + password check. | `auth_service.dart` |
-| `apollo-users-list` | Opening the Engineering-team picker (step 13) | Lists all Airtable users as `{name,email,role}` (role normalized). | `AuthService.listUsers()` |
-| `apollo-du-rates` | Calculator warm-up (each session) | Reads the **manual** DU price sheet → `{du_rates:{meralco,batelec1,batelec2,ormeco,...}}`. Rate of 0/blank is ignored (keeps fallback). | `fetchDuRates()` in `solar_calculator.dart` |
+| `apollo-auth` | Login / Register | n8n user lookup/create + password check → responds `{ok, user, token}`. Role normalized to `sales\|hos\|eng\|hoe\|admin` by the app. | `auth_service.dart` |
+| `apollo-users-list` | Opening the Engineering-team picker (Stage 5 · `eng_assign`) | Lists all users as `{name,email,role}` (role normalized). | `AuthService.listUsers()` |
+| `apollo-solar-pricing` | Calculator warm-up (each session) | Returns current equipment pricing tiers from the Google Sheet — overrides the hardcoded fallback in `solar_calculator.dart`. | `fetchLivePricing()` in `solar_calculator.dart` |
+| `apollo-du-rates` | Calculator warm-up (each session) | Reads the **manual** DU price sheet → `{ok, du_rates:{meralco,batelec1,batelec2,ormeco,...}, updated_at}`. Rate of 0/blank is ignored (keeps fallback). | `fetchDuRates()` in `solar_calculator.dart` |
 
 ## The one rule that keeps data clean
 
@@ -63,14 +65,25 @@ node's column mapping** — refreshing columns alone does nothing.
   each `{url, downloadUrl, name, by, at}`. The ticket UI reads this to show View/Download.
 - Which step needs which file is defined in `ticket_pipeline.dart` → `kStepDeliverables`.
 
-## Roles (Airtable label → app key)
+## Roles (app key → label)
 
-Sales→`sales`, Head of Sales→`hos`, Engineering→`eng`, Head of Engineering→`hoe`,
-Admin→`admin`. Step ownership + who-can-act is in `ticket_pipeline.dart` (`canActOn`).
+| Key | Label | Can act on |
+|---|---|---|
+| `sales` | Sales Agent | `sales` steps |
+| `hos` | Head of Sales | `sales` + `hos` steps |
+| `eng` | Engineer | `eng` steps |
+| `hoe` | Head of Engineering | `eng` + `hoe` steps |
+| `admin` | Admin | All steps |
+
+Step ownership is defined per step in `kTicketSteps`; `canActOn(userRole, stepOwner)`
+in `ticket_pipeline.dart` is the single gatekeeper for both the tracker UI and the
+dashboard "Awaiting You" list.
 
 ## All endpoint URLs are centralised
 
-In `services/booking_service.dart` as `k...Url` constants. Change a path in ONE place.
+In `services/auth_service.dart` (`kAuthUrl`, `kUsersListUrl`) and
+`services/booking_service.dart` (`k...Url` constants) and
+`utils/solar_calculator.dart` (`kPricingUrl`, `kDuRatesUrl`). Change a path in ONE place.
 
 ## Notifications (Tier 1 — in-app, no push)
 
@@ -85,7 +98,7 @@ refreshed every 60s and on app-resume. Tapping the bell opens
 - **Tier 2** (accurate unread + history): the update workflow writes a row to a
   `Notifications` sheet/table targeted at the next role/person; the app reads that
   instead of recomputing from bookings. Capture engineer **emails** (not just
-  names) at step 13 so notifications can target specific people.
+  names) at stage 5 so notifications can target specific people.
 - **Tier 3** (real push while app closed): add `firebase_messaging` — one Flutter
   API covers **both Android (FCM) and iOS (APNs)**. On login, register the device
   token against the user; when n8n writes a Tier-2 notification, it also calls FCM
@@ -139,3 +152,5 @@ write volume grows past Sheets' comfortable range.
   n8n **Executions** log for that webhook and read the failing node.
 - **Webhook 404 from the app** → the workflow isn't **Active** (production URLs only
   work when active).
+- **DU rates or pricing not updating** → check the `apollo-du-rates` / `apollo-solar-pricing`
+  execution log. Ensure the Google Sheet columns match what the Build Row node sends.

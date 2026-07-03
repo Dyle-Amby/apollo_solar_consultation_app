@@ -74,13 +74,14 @@ There are **no `.env` files** — all backend URLs are hardcoded constants in th
 |---|---|---|
 | `kAuthUrl` | `lib/services/auth_service.dart` | Login & Registration endpoint |
 | `kUsersListUrl` | `lib/services/auth_service.dart` | List all registered users |
-| `kBookingCreateUrl` | `lib/services/booking_service.dart` | Create new consultation (+ Drive folder) |
+| `kBookingCreateUrl` | `lib/services/booking_service.dart` | Create new consultation (+ Drive folder, atomic) |
 | `kBookingUpdateUrl` | `lib/services/booking_service.dart` | Update an existing consultation row |
 | `kBookingListUrl` | `lib/services/booking_service.dart` | Fetch all / one consultation(s) |
 | `kConsultationBookedUrl` | `lib/services/booking_service.dart` | Fire confirmation email workflow |
-| `kFolderCreateUrl` | `lib/services/booking_service.dart` | Create Google Drive folder |
+| `kFolderCreateUrl` | `lib/services/booking_service.dart` | Standalone Drive folder creation (recovery) |
 | `kDeliverableUploadUrl` | `lib/services/booking_service.dart` | Upload file to Drive folder |
-| `kPricingUrl` | `lib/utils/solar_calculator.dart` | Fetch live solar pricing tiers |
+| `kPricingUrl` | `lib/utils/solar_calculator.dart` | Fetch live solar equipment pricing tiers |
+| `kDuRatesUrl` | `lib/utils/solar_calculator.dart` | Fetch live distribution utility ₱/kWh rates |
 
 > **Note:** All endpoints point to `https://bernard100.app.n8n.cloud/webhook/...`. Coordinate with the backend owner before changing these.
 

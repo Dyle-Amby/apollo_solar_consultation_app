@@ -27,7 +27,7 @@ lib/
 │       ├── notification_screen.dart # In-app notification inbox
 │       └── consultation/
 │           ├── consultation_flow.dart      # Orchestrates the 8-step wizard
-│           ├── consultation_steps/         # One file per wizard step (Step 1-8)
+│           ├── consultation_steps/         # One file per wizard step (Step 1–8)
 │           │   ├── step1_client_info.dart
 │           │   ├── step2_priority.dart
 │           │   ├── step3_system_type.dart
@@ -47,7 +47,7 @@ lib/
 │   ├── ticket_pipeline.dart         # Pipeline definition: 21 steps, role ownership, helpers
 │   └── notification_service.dart    # Computes per-role action queues from bookings
 ├── utils/
-│   ├── solar_calculator.dart        # Solar sizing engine (ported from website calcTier())
+│   ├── solar_calculator.dart        # Solar sizing engine + live DU rate fetch
 │   └── consultation_pdf.dart        # PDF report generator using the pdf package
 └── widgets/
     ├── choice_card.dart             # Reusable selection card widget
@@ -63,7 +63,7 @@ The app uses **plain Dart classes with `setState`** — no external state manage
 
 | Layer | Mechanism |
 |---|---|
-| Auth session | `Session` singleton (static fields) |
+| Auth session | `Session` singleton (static fields: `name`, `email`, `role`, `token`) |
 | Consultation wizard data | `ConsultationData` object, passed down through the step navigator |
 | Ticket pipeline state | Derived on-the-fly from the `events` JSON column on each booking row |
 | Notifications | `NotificationService.queueFrom(bookings)` computed on each dashboard refresh |
@@ -79,7 +79,17 @@ The app uses **plain Dart classes with `setState`** — no external state manage
 Each consultation ticket stores an `events` JSON array (e.g., `[{ "stepKey": "ocular_booked", "date": "...", "actor": "..." }]`). The current pipeline step is derived by finding the first `kTicketStep` whose key is **not yet** in the events set. This means no status field ever needs to be manually updated — the pipeline state is always computed from the immutable event log.
 
 ### Single Flat Row per Consultation
-Each consultation maps to exactly one row in Google Sheets, keyed by a `Ref` number. The `events` column and `Deliverables` column store JSON. This avoids relational joins but means all updates must be full-row upserts via `BookingService.save()`.
+Each consultation maps to exactly one row in Google Sheets, keyed by a `Ref` number (`APL-XXXX`). The `events` column and `Deliverables` column store JSON. This avoids relational joins but means all updates must be full-row upserts via `BookingService.save()`.
 
-### Live Pricing via n8n
-`solar_calculator.dart` ships a hardcoded tier database as an offline fallback. At startup, `fetchLivePricing()` calls the `apollo-solar-pricing` webhook to pull current prices from the Google Sheet, so the app stays in sync with the website calculator without a code release.
+### App Is the Single Row Writer
+The deliverable-upload webhook only stores files in Drive and returns links. The app is responsible for folding those links into the `deliverables` map and persisting the row via `apollo-booking-update`. This prevents race conditions between status changes and file uploads.
+
+### Live Pricing & DU Rates via n8n
+`solar_calculator.dart` ships hardcoded fallback data for both equipment tiers and distribution utility (DU) electricity rates. At startup:
+- `fetchLivePricing()` calls `apollo-solar-pricing` to pull current equipment prices from the Google Sheet.
+- `fetchDuRates()` calls `apollo-du-rates` to pull current ₱/kWh rates per DU.
+
+This keeps the app in sync with the website calculator without a code release.
+
+### Role-Based Action Gating
+`ticket_pipeline.dart` defines `kRolePermissions` — which step-owner types each account role may act on. `canActOn(userRole, stepOwner)` is the single gatekeeper used by both the ticket tracker UI and the dashboard's "Awaiting You" list to ensure they always agree.

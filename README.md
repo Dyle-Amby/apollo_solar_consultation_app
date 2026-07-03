@@ -6,8 +6,8 @@ The Apollo Solar Consultation App is an internal tool developed for Apollo Solar
 
 - **Role-Based Access Control**: Tailored dashboards and actions for Sales Agents, Head of Sales (HOS), Engineers, Head of Engineering (HOE), and Admin.
 - **Consultation Ticket Pipeline**: A structured 21-step workflow that tracks client transactions across 7 stages — from initial ocular visit booking through to completed installation.
-- **Dashboard & Analytics**: Quick overview of tickets awaiting your action, in progress, and completed.
-- **Costing & Specifications**: Aids sales agents in providing approximate costing and system specifications based on client details during the consultation.
+- **Dashboard & Notifications**: Quick overview of tickets awaiting your action, in progress, and completed. Bell badge shows new unread items refreshed every 60 seconds.
+- **Solar Sizing & Costing**: Aids sales agents in providing approximate costing and system specifications based on client details during the consultation, with live pricing and distribution utility rate fetches from n8n.
 - **Geolocation & Mapping**: Integrated maps for site location tagging using `flutter_map` and `geolocator`.
 - **Document Management**: Supports file and image attachments uploaded directly to Google Drive via `file_picker` and `image_picker`.
 - **PDF Generation**: Automated PDF report generation and printing using the `pdf` and `printing` packages.
@@ -39,3 +39,4 @@ The Apollo Solar Consultation App is an internal tool developed for Apollo Solar
 | [Workflows & Roles](docs/workflows.md) | User roles, the 8-step consultation wizard, and the 21-step ticket pipeline |
 | [Setup Guide](docs/setup.md) | Prerequisites, environment configuration, and build instructions |
 | [API Reference](docs/api.md) | n8n webhook endpoints, request/response shapes, and data models |
+| [Backend Handover](docs/handover.md) | n8n workflow architecture, Google Sheets mapping, and operational runbook |

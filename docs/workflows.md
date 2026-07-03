@@ -2,15 +2,17 @@
 
 ## User Roles
 
-The app supports five roles. Each role has access to a specific subset of pipeline steps.
+The app supports five roles. Each role has access to a specific subset of pipeline steps, controlled by `kRolePermissions` in `ticket_pipeline.dart`.
 
 | Role Key | Label | Can Act On |
 |---|---|---|
-| `sales` | Sales Agent | Sales-owned steps |
-| `hos` | Head of Sales | Sales + HOS-owned steps |
-| `eng` | Engineer | Engineering-owned steps |
-| `hoe` | Head of Engineering | Engineering + HOE-owned steps |
-| `admin` | Admin | All steps |
+| `sales` | Sales Agent | `sales`-owned steps |
+| `hos` | Head of Sales | `sales` + `hos`-owned steps |
+| `eng` | Engineer | `eng`-owned steps |
+| `hoe` | Head of Engineering | `eng` + `hoe`-owned steps |
+| `admin` | Admin | All steps (`sales`, `hos`, `eng`, `hoe`) |
+
+> Role strings are normalized at login by `_normRole()` in `auth_service.dart` to handle any spelling variants returned by the backend.
 
 ---
 
@@ -23,7 +25,7 @@ A Sales Agent initiates a new consultation by filling out an 8-step wizard. All 
 | 1 | `step1_client_info.dart` | Full name, contact, email, property type, address, GPS coordinates |
 | 2 | `step2_priority.dart` | Client priority: Savings / Zero Bill / Backup / Off-Grid |
 | 3 | `step3_system_type.dart` | System type: Grid-Tied or Hybrid |
-| 4 | `step4_electricity.dart` | Last 3 monthly electricity bills, distribution utility (Meralco, Batelec, etc.) |
+| 4 | `step4_electricity.dart` | Last 3 monthly electricity bills, distribution utility (Meralco, Batelec I/II, ORMECO, LIMA, Other) |
 | 5 | `step5_roof_info.dart` | Roof type, dimensions (L × W), orientation, obstructions |
 | 6 | `step6_battery.dart` | (Hybrid only) Number and HP of AC units, battery quantity |
 | 7 | `step7_timeline.dart` | Installation timeline: ASAP / 1–3 months / 3–6 months / Just Looking |
@@ -76,31 +78,47 @@ Stage 7 · Installation          (Engineering)
 
 ### Client Decision Outcomes (`client_ok` step)
 
-| Outcome | Meaning | Ticket Effect |
-|---|---|---|
-| `closing` | For Closing — client approved | Ticket proceeds to Stages 5–7 |
-| `workable` | Still negotiating | Ticket parks on `client_ok`, re-decidable later |
-| `lost` | Did Not Push Through | Ticket closes; no further actions required |
+| Outcome | Key | Meaning | Ticket Effect |
+|---|---|---|---|
+| For Closing | `closing` | Client approved | Ticket proceeds to Stages 5–7 |
+| Workable | `workable` | Still negotiating | Ticket parks on `client_ok`, re-decidable later |
+| Did Not Push Through | `lost` | Lost deal | Ticket closes; `ticketIsClosed()` returns `true`; no further actions |
+
+A reason note can be captured alongside the `lost` outcome and is accessible via `ticketLostReason()`.
 
 ### Deliverable Steps
 
 Three steps require a file to be uploaded before they can be marked complete:
 
-| Step Key | Required File(s) |
-|---|---|
-| `ocular_quote` | Final Quotation PDF |
-| `pod` | Proof of Delivery photo |
-| `install_photos` | Before, During, After installation photos |
+| Step Key | Required File(s) | Deliverable Type Key(s) |
+|---|---|---|
+| `ocular_quote` | Final Quotation PDF | `quotation` |
+| `pod` | Proof of Delivery photo | `proof_delivery` |
+| `install_photos` | Before, During, After installation photos | `install_before`, `install_during`, `install_after` |
 
-Files are uploaded to the ticket's Google Drive folder (named `ClientName-RefNo`) via `BookingService.uploadDeliverable()`.
+Files are uploaded to the ticket's Google Drive folder (named `ClientName-RefNo`) via `BookingService.uploadDeliverable()`. `stepDeliverablesSatisfied()` in `ticket_pipeline.dart` gates step completion.
+
+---
+
+## Solar Calculator
+
+`SolarCalculator` in `lib/utils/solar_calculator.dart` produces the sizing recommendation shown at Step 8. It is a port of the website's `calcTier()` function with these constants:
+
+| Constant | Value | Notes |
+|---|---|---|
+| PSH (Peak Sun Hours) | `4.25` | Matches Technical Study basis |
+| Loss factor | `0.20` | Equivalent to ÷0.8 sizing factor |
+| Degradation | `0.005` | 0.5% annual panel degradation |
+
+At startup, `fetchDuRates()` pulls live ₱/kWh rates per distribution utility from `apollo-du-rates` to keep savings calculations in sync. Equipment pricing is pulled from `apollo-solar-pricing`. Both have hardcoded fallbacks if the fetch fails.
 
 ---
 
 ## Dashboard & Notifications
 
 The **Dashboard** (`dashboard.dart`) displays:
-- **Awaiting You** — tickets where the current pipeline step is owned by the signed-in user's role.
+- **Awaiting You** — tickets where the current pipeline step is owned by the signed-in user's role (via `canActOn()`).
 - **In Progress** — tickets actively moving through the pipeline.
 - **Completed** — tickets that have reached the `completed` step.
 
-The **Notification bell** (`notification_screen.dart`) shows the same "Awaiting You" queue but tracks which items the user has already seen using `shared_preferences`, enabling a "new unread" badge count.
+The **Notification bell** (`notification_screen.dart`) shows the same "Awaiting You" queue (computed by `NotificationService.queueFrom()`) but tracks which items the user has already seen using `shared_preferences`, enabling a "new unread" badge count. The dashboard refreshes every **60 seconds** and on app resume.
