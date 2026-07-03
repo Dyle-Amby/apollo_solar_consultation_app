@@ -52,6 +52,7 @@ class _ConsultationDetailsScreenState extends State<ConsultationDetailsScreen> {
     'meralco': 'Meralco',
     'batelec1': 'BATELEC I',
     'batelec2': 'BATELEC II',
+    'ormeco': 'ORMECO',
     'lima': 'LIMA',
     'other': 'Other',
   };

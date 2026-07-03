@@ -21,13 +21,21 @@ const double kDegrad = 0.005;
 
 const String kPricingUrl =
     'https://bernard100.app.n8n.cloud/webhook/apollo-solar-pricing';
+// Manually-maintained DU price sheet (workaround for the auto-scraper).
+// Returns {ok, du_rates:{meralco,batelec1,batelec2,ormeco,...}, updated_at}.
+const String kDuRatesUrl =
+    'https://bernard100.app.n8n.cloud/webhook/apollo-du-rates';
 
 // ── Mutable pricing data (live fetch may override) ──────────
+// Fallback all-in residential ₱/kWh. The manual DU sheet (apollo-du-rates)
+// overrides these at runtime; these are only used if that fetch fails.
+// Figures current as of mid-2026 — see the DU price sheet for the live values.
 Map<String, double> duRates = {
-  'meralco': 11.50,
-  'batelec1': 10.80,
-  'batelec2': 10.50,
-  'lima': 9.00,
+  'meralco': 14.48, // Meralco Jun 2026 overall residential
+  'batelec1': 10.50, // BATELEC I (approx — verify vs latest advisory)
+  'batelec2': 9.64, // BATELEC II Mar 2026 residential low-voltage
+  'ormeco': 9.68, // ORMECO Apr 2026 residential (dropping mid-2026)
+  'lima': 9.00, // LIMA economic zone
   'other': 10.00,
 };
 
@@ -145,7 +153,33 @@ Future<void>? _pricingFuture;
 
 /// Fetch pricing once per app session. Safe to call from the flow's
 /// initState (warm-up) and again from the results page — both share one fetch.
-Future<void> ensurePricing() => _pricingFuture ??= fetchLivePricing();
+Future<void> ensurePricing() => _pricingFuture ??= _loadPricing();
+
+Future<void> _loadPricing() async {
+  await fetchLivePricing(); // component/tier pricing (ASV PRICE SOURCE)
+  await fetchDuRates();     // DU ₱/kWh from the manual DU sheet — wins for DUs
+}
+
+/// Pull DU rates from the manually-maintained DU price sheet. A rate of 0 or
+/// blank is IGNORED (keeps the fallback), so an un-filled sheet row can never
+/// zero out a rate and cause a divide-by-zero in the bill→kWh conversion.
+Future<void> fetchDuRates() async {
+  try {
+    final url = Uri.parse('$kDuRatesUrl?t=${DateTime.now().millisecondsSinceEpoch}');
+    final res = await http.get(url).timeout(const Duration(seconds: 30));
+    if (res.statusCode != 200) return;
+    final data = jsonDecode(res.body);
+    final rates = (data is Map) ? data['du_rates'] : null;
+    if (rates is Map) {
+      rates.forEach((k, v) {
+        final r = v is num ? v.toDouble() : double.tryParse('$v');
+        if (r != null && r > 0) duRates['$k'] = r;
+      });
+    }
+  } catch (_) {
+    // keep whatever we already have (live or fallback)
+  }
+}
 
 Future<void> fetchLivePricing() async {
   try {
