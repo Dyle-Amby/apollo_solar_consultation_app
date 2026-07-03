@@ -15,6 +15,7 @@ point. The app (`booking_service.dart`) decides which webhook to call and when.
 | `consultation-booked` | After a successful booking with a date | Confirmation email (Gmail). **Leave untouched.** Fire-and-forget. | `fireConsultationBooked()` |
 | `apollo-auth` | Login / Register | Airtable user lookup/create + password check. | `auth_service.dart` |
 | `apollo-users-list` | Opening the Engineering-team picker (step 13) | Lists all Airtable users as `{name,email,role}` (role normalized). | `AuthService.listUsers()` |
+| `apollo-du-rates` | Calculator warm-up (each session) | Reads the **manual** DU price sheet → `{du_rates:{meralco,batelec1,batelec2,ormeco,...}}`. Rate of 0/blank is ignored (keeps fallback). | `fetchDuRates()` in `solar_calculator.dart` |
 
 ## The one rule that keeps data clean
 
